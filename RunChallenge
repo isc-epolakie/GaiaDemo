@@ -9,9 +9,11 @@ X="${X:-${1:-10}}"
 DATA="${DATA:-Data}"                 # host dir with GaiaSource_*.csv.gz
 NFILES="${GAIA_NFILES:-20}"
 
-# 1. Extract the .gz files into Data/csv (idempotent). This dir is mounted into
-#    the IRIS container at /data/gaia (see docker-compose.yml).
-GAIA_NFILES="$NFILES" bash scripts/prepare_data.sh "$DATA" "$DATA/csv" >&2
+# 1. Extract the .gz files from $DATA into Data/csv (idempotent). Data/csv is the
+#    dir bind-mounted into the IRIS container at /data/gaia (see docker-compose.yml),
+#    so the destination is always Data/csv regardless of where the source .gz live
+#    (e.g. CI uses DATA=tests/fixtures but the server still reads /data/gaia).
+GAIA_NFILES="$NFILES" bash scripts/prepare_data.sh "$DATA" "Data/csv" >&2
 
 # 2. Ensure the stack is running and wait for IRIS to accept SQL.
 docker compose up -d >&2

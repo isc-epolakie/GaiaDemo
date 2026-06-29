@@ -6,6 +6,8 @@ durable/compose/
 webgateway/durable/
 *.csv
 *.csv.gz
+# but DO track the tiny committed CI fixture (real data stays ignored above)
+!tests/fixtures/*.csv.gz
 
 # Python
 __pycache__/
