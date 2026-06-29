@@ -29,8 +29,8 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install IRIS DB-API driver
-        run: pip install intersystems-irispython
+      - name: Install Python dependencies
+        run: pip install intersystems-irispython pytest
 
       # Run the unmodified challenge entrypoint against the committed fixture.
       # GAIA_NFILES=1 -> only the single sample file is needed; X=0 ensures the
