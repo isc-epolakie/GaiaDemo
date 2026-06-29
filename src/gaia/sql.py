@@ -19,11 +19,11 @@ def build_query(x: float, *, limit: int | None = None) -> str:
     top = f"TOP {int(limit)} " if limit else ""
     # floor flux-std to flux*0.001 to keep LOG10 in-domain when scatter >= flux
     return f"""
-SELECT {top}source_id, ra, dec, mag_max, mag_min, pct_change FROM (
+SELECT {top}source_id, ra, "dec", mag_max, mag_min, pct_change FROM (
     SELECT
         source_id,
         ra,
-        "dec" AS dec,
+        "dec",
         phot_g_mean_mag + 2.5*LOG10({_FLUX} / GREATEST({_FLUX} - {_STD}, {_FLUX}*0.001)) AS mag_max,
         phot_g_mean_mag - 2.5*LOG10(({_FLUX} + {_STD}) / {_FLUX})                         AS mag_min,
         {_PCT}                                                                           AS pct_change
