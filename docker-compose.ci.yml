@@ -1,0 +1,25 @@
+# Standalone CI / no-license compose file.
+#
+# The primary docker-compose.yml uses the licensed image
+# containers.intersystems.com/intersystems/iris:latest-cd, which a stock GitHub
+# runner cannot pull (needs registry auth + a license key). This file is used
+# ALONE in CI (docker compose -f docker-compose.ci.yml ...) to run the full
+# headless pipeline — server-side LOAD DATA + the proxy query — against the
+# PUBLIC Community Edition image, with no license, no durable dir, and no web
+# gateway (the RunChallenge path is headless and needs none of those).
+#
+# It deliberately keeps the same container_name (IRISGAIADEMO) and host port
+# (8881->1972) as the base file so RunChallenge works unchanged.
+services:
+  iris:
+    image: intersystemsdc/iris-community:latest
+    init: true
+    container_name: IRISGAIADEMO
+    hostname: iris
+    ports:
+      - "8881:1972"
+    volumes:
+      - type: bind
+        source: ./Data/csv
+        target: /data/gaia
+        read_only: true
