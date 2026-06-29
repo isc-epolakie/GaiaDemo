@@ -1,21 +1,23 @@
 name: RunChallenge
 
-# Demonstrates the headless pipeline end-to-end on a TINY committed sample.
+# Runs the headless pipeline end-to-end on a TINY committed sample, against the
+# PUBLIC Community Edition IRIS image — so it passes unattended on a stock runner.
 #
-# IMPORTANT REALITY CHECK:
+# Notes:
 #   * The real Gaia dataset (~800 MB, 20 files) is gitignored and user-provided,
-#     so CI cannot run the full challenge. Instead it runs the same pipeline
-#     against the small fixture under tests/fixtures/ with GAIA_NFILES=1.
-#   * The IRIS and Web Gateway images are pulled from
-#     containers.intersystems.com, which generally requires authentication and a
-#     valid license. In an arbitrary fork this step WILL fail without configuring
-#     registry credentials / an IRIS license as CI secrets. This workflow
-#     therefore documents and exercises the *shape* of the pipeline; it is not
-#     guaranteed to pass unattended in a fork that lacks access to the image.
-#     To make it pass, add a `docker login containers.intersystems.com` step
-#     using repository secrets and supply a license key under durable/.
+#     so CI runs the same pipeline against tests/fixtures/ with GAIA_NFILES=1.
+#   * The primary docker-compose.yml uses the LICENSED image
+#     containers.intersystems.com/intersystems/iris:latest-cd (registry auth +
+#     license required). CI instead uses docker-compose.ci.yml (Community
+#     Edition, no license) via COMPOSE_FILE, which RunChallenge picks up
+#     natively. The local/production experience is unchanged.
 
 on: [push, workflow_dispatch]
+
+# RunChallenge reads COMPOSE_FILE through `docker compose`, so this single env
+# var swaps the whole stack to the no-license Community Edition for every step.
+env:
+  COMPOSE_FILE: docker-compose.ci.yml
 
 jobs:
   run:
@@ -27,29 +29,13 @@ jobs:
         with:
           python-version: "3.13"
 
-      - name: Install IRIS DB-API driver
-        run: pip install intersystems-irispython
-
-      # NOTE: requires access to containers.intersystems.com (see header).
-      # - name: Log in to the InterSystems registry
-      #   run: echo "${{ secrets.ISC_REGISTRY_TOKEN }}" | docker login containers.intersystems.com -u "${{ secrets.ISC_REGISTRY_USER }}" --password-stdin
-
-      - name: Start IRIS + Web Gateway
-        run: docker compose up -d
-
-      - name: Wait for IRIS to accept SQL
-        run: |
-          for _ in $(seq 1 60); do
-            if docker compose exec -T iris iris session iris -U USER <<<'halt' >/dev/null 2>&1; then
-              echo "IRIS ready"; exit 0
-            fi
-            sleep 2
-          done
-          echo "IRIS did not become ready in time" >&2; exit 1
+      - name: Install Python dependencies
+        run: pip install intersystems-irispython pytest
 
       # Run the unmodified challenge entrypoint against the committed fixture.
       # GAIA_NFILES=1 -> only the single sample file is needed; X=0 ensures the
       # 500-row sample yields rows so the shape check has something to validate.
+      # RunChallenge brings the container up, waits for health, and runs itself.
       - name: Run challenge on the sample fixture
         run: X=0 GAIA_NFILES=1 DATA=tests/fixtures ./RunChallenge > out.csv
 
@@ -59,5 +45,7 @@ jobs:
           awk -F, 'NF!=6{print "bad line "NR": "$0 > "/dev/stderr"; exit 1}' out.csv
           echo "$(wc -l < out.csv) rows, all 6 fields"
 
-      - name: Run unit tests
+      # The container is already up from the previous step; run the full suite
+      # (pure unit tests + the live-IRIS integration parity test).
+      - name: Run tests
         run: PYTHONPATH=. python -m pytest -q
