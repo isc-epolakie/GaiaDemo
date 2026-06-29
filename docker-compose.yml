@@ -1,0 +1,35 @@
+services:
+  # iris container
+  iris:
+    image: containers.intersystems.com/intersystems/iris:latest-cd
+    command: --key /iris-shared/key/iris.key
+    init: true
+    container_name: IRISGAIADEMO
+    hostname: iris
+    ports:
+    - "8881:1972"
+    environment: 
+    - ISC_DATA_DIRECTORY=/iris-shared/durable
+    volumes:
+    - type: bind
+      source: ./durable/compose
+      target: /iris-shared
+
+  # web gateway container
+  webgateway:
+    image: containers.intersystems.com/intersystems/webgateway:latest-cd
+    init: true
+    container_name: IRISGAIADemoWebgateway
+    hostname: webgateway
+    ports:
+    - "8882:80"
+    - "8885:443"
+    environment:
+    - ISC_DATA_DIRECTORY=/webgateway-shared/durable
+    - ISC_CSP_CONF_FILE=/webgateway-shared/CSP.conf
+    - ISC_CSP_INI_FILE=/webgateway-shared/CSP.ini
+    volumes:
+    - type: bind
+      source: ./webgateway
+      target: /webgateway-shared
+      read_only: false
