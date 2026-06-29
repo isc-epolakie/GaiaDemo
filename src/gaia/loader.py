@@ -3,7 +3,6 @@ Driven from host Python over DB-API; `data_dir` is the path AS SEEN BY THE IRIS
 SERVER (the container mount, e.g. /data/gaia). With header:true, IRIS maps CSV
 header names to the like-named table columns and ignores the other ~50 columns
 (Task 1 spike: there is NO COLUMNS clause)."""
-import os
 from src.gaia.sql import TABLE
 
 # header:true (NOT 1) — the DB-API driver misparses ":1" as a bind parameter.

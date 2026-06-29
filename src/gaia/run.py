@@ -21,7 +21,10 @@ def connect():
 
 def _fmt(v):
     if v is None: return ""
-    if isinstance(v, float): return repr(v)
+    if isinstance(v, float):
+        # Plain decimal, never scientific notation (ra/dec/mag are bounded, so
+        # 12 dp keeps full precision); strip trailing zeros for clean CSV.
+        return f"{v:.12f}".rstrip("0").rstrip(".")
     return str(v)
 
 def main():

@@ -9,8 +9,13 @@ XData UrlMap [ XMLNamespace = "http://www.intersystems.com/urlmap" ]
 
 ClassMethod Variations() As %Status
 {
+  // Coerce params to numbers so a non-numeric query string (e.g. ?x=abc) yields
+  // a sane default instead of a 500 from float() inside the embedded-Python call.
   Set x = $Get(%request.Data("x",1), 10)
+  Set:'$IsValidNum(x) x = 10
   Set limit = $Get(%request.Data("limit",1), 1000)
+  Set:('$IsValidNum(limit))!(limit<1) limit = 1000
+  Set limit = limit \ 1
   // Reuse the exact proxy SQL from src/gaia/sql.py via embedded Python (DRY).
   // build_query has a keyword-only `limit`; call the positional helper to avoid
   // keyword-arg friction across the ObjectScript<->Python boundary.
