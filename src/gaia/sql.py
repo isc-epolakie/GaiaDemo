@@ -33,3 +33,7 @@ SELECT {top}source_id, ra, "dec", mag_max, mag_min, pct_change FROM (
 WHERE pct_change >= {x}
 ORDER BY pct_change DESC
 """.strip()
+
+def build_query_limited(x, limit):
+    """Positional wrapper for ObjectScript/%SYS.Python callers."""
+    return build_query(x, limit=int(limit))

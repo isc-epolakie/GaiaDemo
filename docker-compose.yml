@@ -18,6 +18,10 @@ services:
       source: ./Data/csv
       target: /data/gaia
       read_only: true
+    - type: bind
+      source: .
+      target: /irisrun/repo
+      read_only: true
 
   # web gateway container
   webgateway:

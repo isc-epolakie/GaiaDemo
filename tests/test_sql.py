@@ -1,5 +1,5 @@
 # tests/test_sql.py
-from src.gaia.sql import build_query, TABLE
+from src.gaia.sql import build_query, build_query_limited, TABLE
 
 def test_query_contains_required_columns_in_order():
     q = build_query(10)
@@ -23,3 +23,6 @@ def test_query_floors_flux_to_avoid_log_domain_error():
 def test_limit_optional():
     assert "top" in build_query(10, limit=5).lower() or "limit" in build_query(10, limit=5).lower()
     assert "top" not in build_query(10).lower().split("from")[0] or "limit" not in build_query(10).lower()
+
+def test_build_query_limited_wrapper():
+    assert build_query_limited(25, 5) == build_query(25, limit=5)
