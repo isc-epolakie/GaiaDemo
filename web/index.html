@@ -1,0 +1,29 @@
+<!doctype html><html><head><meta charset="utf-8"><title>Gaia Brightness Variations</title>
+<style>body{font-family:system-ui;margin:2rem}table{border-collapse:collapse;width:100%}
+th,td{border:1px solid #ccc;padding:4px 8px;text-align:right}th{cursor:pointer;background:#f0f0f0}
+td:first-child,th:first-child{text-align:left}</style></head><body>
+<h1>Gaia Brightness Variation Detector</h1>
+<p>Threshold X (%): <input id="x" type="number" value="10" min="0" step="1">
+<input id="limit" type="number" value="500" min="1" step="100" title="max rows">
+<button onclick="load()">Find</button> <span id="status"></span></p>
+<table><thead><tr id="head"></tr></thead><tbody id="body"></tbody></table>
+<script>
+const COLS=["source_id","ra","dec","mag_max","mag_min","pct_change"];
+let rows=[], sortCol="pct_change", asc=false;
+const API=(window.GAIA_API||"/api")+"/variations";
+function render(){
+  document.getElementById("head").innerHTML=COLS.map(c=>`<th onclick="sortBy('${c}')">${c}</th>`).join("");
+  const r=[...rows].sort((a,b)=>{const v=a[sortCol]-b[sortCol]||(""+a[sortCol]).localeCompare(b[sortCol]);return asc?v:-v;});
+  document.getElementById("body").innerHTML=r.map(o=>"<tr>"+COLS.map(c=>`<td>${o[c]}</td>`).join("")+"</tr>").join("");
+}
+function sortBy(c){asc=(c===sortCol)?!asc:false;sortCol=c;render();}
+async function load(){
+  const x=document.getElementById("x").value, lim=document.getElementById("limit").value;
+  document.getElementById("status").textContent="loading…";
+  const res=await fetch(`${API}?x=${encodeURIComponent(x)}&limit=${encodeURIComponent(lim)}`);
+  rows=await res.json();
+  document.getElementById("status").textContent=`${rows.length} objects`;
+  render();
+}
+load();
+</script></body></html>
