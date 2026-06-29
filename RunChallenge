@@ -1,0 +1,30 @@
+#!/usr/bin/env bash
+# Challenge entrypoint: extract data, ensure IRIS is up, then run the host-Python
+# analysis (server-side LOAD DATA + proxy SQL) and stream CSV — one record per
+# line — to stdout. No manual input.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+X="${X:-${1:-10}}"
+DATA="${DATA:-Data}"                 # host dir with GaiaSource_*.csv.gz
+NFILES="${GAIA_NFILES:-20}"
+
+# 1. Extract the .gz files into Data/csv (idempotent). This dir is mounted into
+#    the IRIS container at /data/gaia (see docker-compose.yml).
+GAIA_NFILES="$NFILES" bash scripts/prepare_data.sh "$DATA" "$DATA/csv" >&2
+
+# 2. Ensure the stack is running and wait for IRIS to accept SQL.
+docker compose up -d >&2
+for _ in $(seq 1 60); do
+  if docker compose exec -T iris iris session iris -U USER <<<'halt' >/dev/null 2>&1; then break; fi
+  sleep 2
+done
+
+# 3. Clear the first-login password-expiry so DB-API can authenticate (idempotent).
+docker compose exec -T iris iris session iris -U %SYS >&2 <<'EOF' || true
+do ##class(Security.Users).UnExpireUserPasswords("*")
+halt
+EOF
+
+# 4. Run the analysis from the host over DB-API; only CSV reaches stdout.
+MSYS_NO_PATHCONV=1 GAIA_X="$X" GAIA_NFILES="$NFILES" GAIA_DATA=/data/gaia PYTHONPATH=. python src/gaia/run.py
