@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# Challenge entrypoint: extract data, ensure IRIS is up, then run the host-Python
+# analysis (server-side LOAD DATA + proxy SQL) and stream CSV — one record per
+# line — to stdout. No manual input.
+set -euo pipefail
+cd "$(dirname "$0")"
+
+X="${X:-${1:-10}}"
+DATA="${DATA:-Data}"                 # host dir with GaiaSource_*.csv.gz
+NFILES="${GAIA_NFILES:-20}"
+
+# 1. Extract the .gz files from $DATA into Data/csv (idempotent). Data/csv is the
+#    dir bind-mounted into the IRIS container at /data/gaia (see docker-compose.yml),
+#    so the destination is always Data/csv regardless of where the source .gz live
+#    (e.g. CI uses DATA=tests/fixtures but the server still reads /data/gaia).
+GAIA_NFILES="$NFILES" bash scripts/prepare_data.sh "$DATA" "Data/csv" >&2
+
+# 2. Ensure the stack is running and wait until IRIS is fully healthy. A bare
+#    `iris session` can succeed before the superserver accepts TCP connections,
+#    so we wait on Docker's healthcheck (which probes real readiness) — otherwise
+#    the DB-API connect below can race a still-starting server on a cold start.
+docker compose up -d >&2
+for _ in $(seq 1 90); do
+  status=$(docker inspect -f '{{.State.Health.Status}}' IRISGAIADEMO 2>/dev/null || echo starting)
+  [ "$status" = "healthy" ] && break
+  sleep 2
+done
+
+# 3. Clear the first-login password-expiry so DB-API can authenticate (idempotent).
+docker compose exec -T iris iris session iris -U %SYS >&2 <<'EOF' || true
+do ##class(Security.Users).UnExpireUserPasswords("*")
+halt
+EOF
+
+# 4. Run the analysis from the host over DB-API; only CSV reaches stdout. Retry
+#    the connect briefly in case the superserver is still settling right after
+#    the healthcheck flips (belt-and-suspenders against cold-start races).
+run() { MSYS_NO_PATHCONV=1 GAIA_X="$X" GAIA_NFILES="$NFILES" GAIA_DATA=/data/gaia PYTHONPATH=. python src/gaia/run.py; }
+for attempt in 1 2 3 4 5; do
+  if run; then exit 0; fi
+  [ "$attempt" -lt 5 ] && { echo "connect attempt $attempt failed; retrying in 3s" >&2; sleep 3; }
+done
+echo "RunChallenge: IRIS did not become reachable" >&2
+exit 1
