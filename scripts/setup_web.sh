@@ -33,7 +33,7 @@ docker compose exec -T iris iris session iris -U %SYS <<'EOF'
   if '##class(Security.Applications).Exists("/gaia") {
     kill q
     set q("NameSpace") = "USER"
-    set q("CSPFileStack") = "/irisrun/repo/web/"
+    set q("Path") = "/irisrun/repo/web/"
     set q("AutheEnabled") = 96
     set q("Enabled") = 1
     set q("ServeFiles") = 1
