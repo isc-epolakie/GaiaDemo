@@ -153,9 +153,14 @@ works without login (local demo only — do not do this in production). The apps
 `/csp/` because the Community Edition built-in web server only forwards that path prefix.
 Then:
 
-- **UI:** `http://localhost:52773/csp/gaia/ui/index.html` → enter X, click *Find*, and
-  sort the result table by any column.
-- **REST:** `http://localhost:52773/csp/gaia/api/variations?x=NN&limit=MM` → JSON array.
+- **UI:** `http://localhost:52773/csp/gaia/ui/index.html` → enter X, click *Find*, page
+  through the results with Prev/Next, and sort the current page by any column.
+- **REST:** `http://localhost:52773/csp/gaia/api/variations?x=NN&page=P&pageSize=S` →
+  `{"x","page","pageSize","total","rows":[…6 fields…]}`, sorted by % change desc.
+
+Results are **paginated server-side** (`pageSize` capped at 5000): a full result set can
+be 160k+ rows, and serialising that into one JSON array overflows IRIS's string stack.
+`page` is 1-based; `total` gives the full match count for the pager.
 
 The REST endpoint runs the exact same proxy SQL as `RunChallenge`. To avoid an
 embedded-Python import that hangs intermittently on the Community image, the SQL is

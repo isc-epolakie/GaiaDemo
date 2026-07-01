@@ -1,29 +1,58 @@
 <!doctype html><html><head><meta charset="utf-8"><title>Gaia Brightness Variations</title>
 <style>body{font-family:system-ui;margin:2rem}table{border-collapse:collapse;width:100%}
 th,td{border:1px solid #ccc;padding:4px 8px;text-align:right}th{cursor:pointer;background:#f0f0f0}
-td:first-child,th:first-child{text-align:left}</style></head><body>
+td:first-child,th:first-child{text-align:left}
+.pager{margin:.75rem 0}.pager button{margin-right:.4rem}#err{color:#b00}</style></head><body>
 <h1>Gaia Brightness Variation Detector</h1>
 <p>Threshold X (%): <input id="x" type="number" value="10" min="0" step="1">
-<input id="limit" type="number" value="500" min="1" step="100" title="max rows">
-<button onclick="load()">Find</button> <span id="status"></span></p>
+Page size: <input id="pageSize" type="number" value="100" min="1" max="5000" step="100">
+<button onclick="find()">Find</button> <span id="status"></span> <span id="err"></span></p>
+<div class="pager">
+  <button id="prev" onclick="go(-1)">◀ Prev</button>
+  <span id="pageinfo"></span>
+  <button id="next" onclick="go(1)">Next ▶</button>
+</div>
 <table><thead><tr id="head"></tr></thead><tbody id="body"></tbody></table>
 <script>
+// Server-side pagination: the API returns one page plus the total count, so the
+// full 160k+ result set is never serialised at once (that overflows IRIS's
+// string stack). Sorting is server-side (pct_change desc); per-page column
+// sorting below is a client-side convenience on the current page only.
 const COLS=["source_id","ra","dec","mag_max","mag_min","pct_change"];
-let rows=[], sortCol="pct_change", asc=false;
 const API=(window.GAIA_API||"/csp/gaia/api")+"/variations";
+let rows=[], total=0, page=1, pageSize=100, sortCol=null, asc=false;
+
+function pages(){ return Math.max(1, Math.ceil(total/pageSize)); }
+
 function render(){
   document.getElementById("head").innerHTML=COLS.map(c=>`<th onclick="sortBy('${c}')">${c}</th>`).join("");
-  const r=[...rows].sort((a,b)=>{const v=a[sortCol]-b[sortCol]||(""+a[sortCol]).localeCompare(b[sortCol]);return asc?v:-v;});
+  let r=rows;
+  if(sortCol){ r=[...rows].sort((a,b)=>{const v=(parseFloat(a[sortCol])-parseFloat(b[sortCol]))||(""+a[sortCol]).localeCompare(""+b[sortCol]);return asc?v:-v;}); }
   document.getElementById("body").innerHTML=r.map(o=>"<tr>"+COLS.map(c=>`<td>${o[c]}</td>`).join("")+"</tr>").join("");
+  document.getElementById("pageinfo").textContent=`Page ${page} / ${pages()} — ${total} objects total`;
+  document.getElementById("prev").disabled = page<=1;
+  document.getElementById("next").disabled = page>=pages();
 }
-function sortBy(c){asc=(c===sortCol)?!asc:false;sortCol=c;render();}
+function sortBy(c){ asc=(c===sortCol)?!asc:false; sortCol=c; render(); }
+
 async function load(){
-  const x=document.getElementById("x").value, lim=document.getElementById("limit").value;
+  const x=document.getElementById("x").value;
   document.getElementById("status").textContent="loading…";
-  const res=await fetch(`${API}?x=${encodeURIComponent(x)}&limit=${encodeURIComponent(lim)}`);
-  rows=await res.json();
-  document.getElementById("status").textContent=`${rows.length} objects`;
-  render();
+  document.getElementById("err").textContent="";
+  try{
+    const res=await fetch(`${API}?x=${encodeURIComponent(x)}&page=${page}&pageSize=${pageSize}`);
+    if(!res.ok) throw new Error(`HTTP ${res.status}`);
+    const data=await res.json();
+    rows=data.rows||[]; total=data.total||0; pageSize=data.pageSize||pageSize;
+    sortCol=null;                        // page arrives pre-sorted by pct_change desc
+    document.getElementById("status").textContent=`showing ${rows.length}`;
+    render();
+  }catch(e){
+    document.getElementById("status").textContent="";
+    document.getElementById("err").textContent=`Error: ${e.message}`;
+  }
 }
-load();
+function find(){ page=1; pageSize=Math.max(1,parseInt(document.getElementById("pageSize").value)||100); load(); }
+function go(d){ const p=page+d; if(p>=1&&p<=pages()){ page=p; load(); } }
+find();
 </script></body></html>
