@@ -1,43 +1,31 @@
+# Single stack for local, CI, and GitHub — the PUBLIC Community Edition image,
+# so what you run locally is exactly what the pipeline runs (no license, no
+# registry auth). Community Edition ships its own web server on 52773, so no
+# separate Web Gateway container is needed:
+#   * host 8881  -> 1972   IRIS superserver (host Python DB-API / RunChallenge)
+#   * host 52773 -> 52773  built-in web server (REST /api + static UI /gaia)
+#
+# The stack is ephemeral (no durable mount) to match a clean CI checkout. After
+# `docker compose up -d`, provision the web apps once with:
+#   bash scripts/setup_web.sh
+# and load data by running ./RunChallenge (it populates Gaia.Source for the UI).
 services:
-  # iris container
   iris:
-    image: containers.intersystems.com/intersystems/iris:latest-cd
-    command: --key /iris-shared/key/iris.key
+    image: intersystemsdc/iris-community:latest
     init: true
     container_name: IRISGAIADEMO
     hostname: iris
     ports:
-    - "8881:1972"
-    environment: 
-    - ISC_DATA_DIRECTORY=/iris-shared/durable
+      - "8881:1972"
+      - "52773:52773"
     volumes:
-    - type: bind
-      source: ./durable/compose
-      target: /iris-shared
-    - type: bind
-      source: ./Data/csv
-      target: /data/gaia
-      read_only: true
-    - type: bind
-      source: .
-      target: /irisrun/repo
-      read_only: true
-
-  # web gateway container
-  webgateway:
-    image: containers.intersystems.com/intersystems/webgateway:latest-cd
-    init: true
-    container_name: IRISGAIADemoWebgateway
-    hostname: webgateway
-    ports:
-    - "8882:80"
-    - "8885:443"
-    environment:
-    - ISC_DATA_DIRECTORY=/webgateway-shared/durable
-    - ISC_CSP_CONF_FILE=/webgateway-shared/CSP.conf
-    - ISC_CSP_INI_FILE=/webgateway-shared/CSP.ini
-    volumes:
-    - type: bind
-      source: ./webgateway
-      target: /webgateway-shared
-      read_only: false
+      # Gaia CSVs the server reads during LOAD DATA (populated by prepare_data.sh)
+      - type: bind
+        source: ./Data/csv
+        target: /data/gaia
+        read_only: true
+      # Repo mount: lets IRIS load Gaia.REST.cls, serve web/, and import src.gaia.sql
+      - type: bind
+        source: .
+        target: /irisrun/repo
+        read_only: true

@@ -1,23 +1,15 @@
 name: RunChallenge
 
-# Runs the headless pipeline end-to-end on a TINY committed sample, against the
-# PUBLIC Community Edition IRIS image — so it passes unattended on a stock runner.
+# Runs the headless pipeline end-to-end on a TINY committed sample. The stack
+# (docker-compose.yml) uses the PUBLIC Community Edition image, so this is the
+# exact same stack that runs locally — it passes unattended on a stock runner
+# with no license or registry auth.
 #
-# Notes:
-#   * The real Gaia dataset (~800 MB, 20 files) is gitignored and user-provided,
-#     so CI runs the same pipeline against tests/fixtures/ with GAIA_NFILES=1.
-#   * The primary docker-compose.yml uses the LICENSED image
-#     containers.intersystems.com/intersystems/iris:latest-cd (registry auth +
-#     license required). CI instead uses docker-compose.ci.yml (Community
-#     Edition, no license) via COMPOSE_FILE, which RunChallenge picks up
-#     natively. The local/production experience is unchanged.
+# Note: the real Gaia dataset (~800 MB, 20 files) is gitignored and
+# user-provided, so CI runs the same pipeline against tests/fixtures/ with
+# GAIA_NFILES=1.
 
 on: [push, workflow_dispatch]
-
-# RunChallenge reads COMPOSE_FILE through `docker compose`, so this single env
-# var swaps the whole stack to the no-license Community Edition for every step.
-env:
-  COMPOSE_FILE: docker-compose.ci.yml
 
 jobs:
   run:

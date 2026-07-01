@@ -10,7 +10,7 @@ td:first-child,th:first-child{text-align:left}</style></head><body>
 <script>
 const COLS=["source_id","ra","dec","mag_max","mag_min","pct_change"];
 let rows=[], sortCol="pct_change", asc=false;
-const API=(window.GAIA_API||"/api")+"/variations";
+const API=(window.GAIA_API||"/csp/gaia/api")+"/variations";
 function render(){
   document.getElementById("head").innerHTML=COLS.map(c=>`<th onclick="sortBy('${c}')">${c}</th>`).join("");
   const r=[...rows].sort((a,b)=>{const v=a[sortCol]-b[sortCol]||(""+a[sortCol]).localeCompare(b[sortCol]);return asc?v:-v;});

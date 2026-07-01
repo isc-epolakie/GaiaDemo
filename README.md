@@ -146,16 +146,21 @@ Provision the web showcase once, after the stack is up:
 bash scripts/setup_web.sh
 ```
 
-This idempotently loads/compiles the REST broker (`src/web/Gaia.REST.cls`), creates an
-unauthenticated `/api` REST application and a static `/gaia` application serving
-`web/index.html`, and enables `UnknownUser` so the demo works without login (local demo
-only — do not do this in production). Then:
+This idempotently loads/compiles the REST broker (`src/web/Gaia.REST.cls`) into the USER
+namespace, creates an unauthenticated `/csp/gaia/api` REST application and a static
+`/csp/gaia/ui` application serving `web/index.html`, and enables `UnknownUser` so the demo
+works without login (local demo only — do not do this in production). The apps live under
+`/csp/` because the Community Edition built-in web server only forwards that path prefix.
+Then:
 
-- **REST:** `http://localhost:8882/api/variations?x=NN&limit=MM` → JSON array of objects.
-- **UI:** `http://localhost:8882/gaia/index.html` → enter X, click *Find*, and sort the
-  result table by any column.
+- **UI:** `http://localhost:52773/csp/gaia/ui/index.html` → enter X, click *Find*, and
+  sort the result table by any column.
+- **REST:** `http://localhost:52773/csp/gaia/api/variations?x=NN&limit=MM` → JSON array.
 
-The REST endpoint reuses the exact same SQL as `RunChallenge`, via embedded Python.
+The REST endpoint runs the exact same proxy SQL as `RunChallenge`. To avoid an
+embedded-Python import that hangs intermittently on the Community image, the SQL is
+inlined in the ObjectScript broker; `tests/test_rest_sql_parity.py` asserts it stays
+identical to `src/gaia/sql.py`.
 
 ## Running tests
 
