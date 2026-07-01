@@ -153,8 +153,13 @@ works without login (local demo only — do not do this in production). The apps
 `/csp/` because the Community Edition built-in web server only forwards that path prefix.
 Then:
 
-- **UI:** `http://localhost:52773/csp/gaia/ui/index.html` → enter X, click *Find*, page
-  through the results with Prev/Next, and sort the current page by any column.
+- **UI:** `http://localhost:52773/csp/gaia/ui/index.html` — an interactive **3D galaxy**
+  (three.js + WebGL). Enter a threshold X, click *Ignite*, and the matching sources
+  burst into existence as a rotating spiral galaxy: each mote is a real Gaia source,
+  sized by luminosity and hued from bioluminescent teal (low variation) to solar gold
+  (high). Drag to orbit, scroll to zoom, hover a star for its data. A translucent data
+  panel (paginate with Prev/Next, sort by any column, minimize with the – button) rides
+  alongside. The page degrades to a data-table notice if WebGL/CDN is unavailable.
 - **REST:** `http://localhost:52773/csp/gaia/api/variations?x=NN&page=P&pageSize=S` →
   `{"x","page","pageSize","total","rows":[…6 fields…]}`, sorted by % change desc.
 

@@ -1,58 +1,455 @@
-<!doctype html><html><head><meta charset="utf-8"><title>Gaia Brightness Variations</title>
-<style>body{font-family:system-ui;margin:2rem}table{border-collapse:collapse;width:100%}
-th,td{border:1px solid #ccc;padding:4px 8px;text-align:right}th{cursor:pointer;background:#f0f0f0}
-td:first-child,th:first-child{text-align:left}
-.pager{margin:.75rem 0}.pager button{margin-right:.4rem}#err{color:#b00}</style></head><body>
-<h1>Gaia Brightness Variation Detector</h1>
-<p>Threshold X (%): <input id="x" type="number" value="10" min="0" step="1">
-Page size: <input id="pageSize" type="number" value="100" min="1" max="5000" step="100">
-<button onclick="find()">Find</button> <span id="status"></span> <span id="err"></span></p>
-<div class="pager">
-  <button id="prev" onclick="go(-1)">◀ Prev</button>
-  <span id="pageinfo"></span>
-  <button id="next" onclick="go(1)">Next ▶</button>
-</div>
-<table><thead><tr id="head"></tr></thead><tbody id="body"></tbody></table>
-<script>
-// Server-side pagination: the API returns one page plus the total count, so the
-// full 160k+ result set is never serialised at once (that overflows IRIS's
-// string stack). Sorting is server-side (pct_change desc); per-page column
-// sorting below is a client-side convenience on the current page only.
-const COLS=["source_id","ra","dec","mag_max","mag_min","pct_change"];
-const API=(window.GAIA_API||"/csp/gaia/api")+"/variations";
-let rows=[], total=0, page=1, pageSize=100, sortCol=null, asc=false;
-
-function pages(){ return Math.max(1, Math.ceil(total/pageSize)); }
-
-function render(){
-  document.getElementById("head").innerHTML=COLS.map(c=>`<th onclick="sortBy('${c}')">${c}</th>`).join("");
-  let r=rows;
-  if(sortCol){ r=[...rows].sort((a,b)=>{const v=(parseFloat(a[sortCol])-parseFloat(b[sortCol]))||(""+a[sortCol]).localeCompare(""+b[sortCol]);return asc?v:-v;}); }
-  document.getElementById("body").innerHTML=r.map(o=>"<tr>"+COLS.map(c=>`<td>${o[c]}</td>`).join("")+"</tr>").join("");
-  document.getElementById("pageinfo").textContent=`Page ${page} / ${pages()} — ${total} objects total`;
-  document.getElementById("prev").disabled = page<=1;
-  document.getElementById("next").disabled = page>=pages();
-}
-function sortBy(c){ asc=(c===sortCol)?!asc:false; sortCol=c; render(); }
-
-async function load(){
-  const x=document.getElementById("x").value;
-  document.getElementById("status").textContent="loading…";
-  document.getElementById("err").textContent="";
-  try{
-    const res=await fetch(`${API}?x=${encodeURIComponent(x)}&page=${page}&pageSize=${pageSize}`);
-    if(!res.ok) throw new Error(`HTTP ${res.status}`);
-    const data=await res.json();
-    rows=data.rows||[]; total=data.total||0; pageSize=data.pageSize||pageSize;
-    sortCol=null;                        // page arrives pre-sorted by pct_change desc
-    document.getElementById("status").textContent=`showing ${rows.length}`;
-    render();
-  }catch(e){
-    document.getElementById("status").textContent="";
-    document.getElementById("err").textContent=`Error: ${e.message}`;
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Gaia · Brightness Variation Atlas</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --teal:#33f0c8; --teal-dim:#1b8f79; --green:#8dffb0; --gold:#ffcf78;
+    --ink:#010409; --panel:rgba(7,22,26,.52); --line:rgba(70,240,205,.20);
+    --text:#d6f2ea; --muted:#7fb8ad;
   }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;overflow:hidden;background:var(--ink);color:var(--text);
+    font-family:Inter,system-ui,sans-serif}
+  canvas{display:block}
+  #scene{position:fixed;inset:0;z-index:0}
+  .hud{position:fixed;z-index:2;pointer-events:none}
+  .hud *{pointer-events:auto}
+
+  /* Title */
+  #title{top:26px;left:30px;max-width:46ch}
+  #title h1{font-family:Orbitron,sans-serif;font-weight:700;font-size:26px;margin:0;
+    letter-spacing:3px;color:#eafffb;text-shadow:0 0 18px rgba(51,240,200,.45)}
+  #title p{margin:6px 0 0;font-size:13px;color:var(--muted);letter-spacing:.3px;line-height:1.5}
+
+  /* Control dock */
+  #dock{top:26px;left:50%;transform:translateX(-50%);display:flex;gap:14px;align-items:center;
+    padding:12px 18px;border-radius:16px;background:var(--panel);backdrop-filter:blur(14px);
+    border:1px solid var(--line);box-shadow:0 8px 40px rgba(0,0,0,.5),inset 0 0 30px rgba(51,240,200,.05)}
+  #dock label{font-size:11px;letter-spacing:1.5px;text-transform:uppercase;color:var(--muted)}
+  #dock input{width:88px;background:rgba(0,0,0,.35);border:1px solid var(--line);color:var(--text);
+    border-radius:9px;padding:9px 11px;font-size:15px;font-family:Orbitron,sans-serif;outline:none}
+  #dock input:focus{border-color:var(--teal);box-shadow:0 0 0 3px rgba(51,240,200,.15)}
+  .btn{cursor:pointer;border:none;border-radius:10px;padding:10px 20px;font-weight:600;
+    font-family:Orbitron,sans-serif;letter-spacing:1.5px;font-size:12px;color:#012;
+    background:linear-gradient(135deg,var(--teal),var(--green));
+    box-shadow:0 0 22px rgba(51,240,200,.5);transition:transform .12s,box-shadow .2s}
+  .btn:hover{transform:translateY(-1px);box-shadow:0 0 30px rgba(51,240,200,.8)}
+  .btn:active{transform:translateY(0)}
+  #status{font-size:12px;color:var(--teal);letter-spacing:.5px;min-width:120px}
+  #status.err{color:#ff8f8f}
+
+  /* Hint */
+  #hint{bottom:18px;left:30px;font-size:11.5px;color:var(--muted);letter-spacing:.4px}
+  #hint b{color:var(--teal);font-weight:600}
+
+  /* Tooltip */
+  #tip{position:fixed;z-index:4;pointer-events:none;opacity:0;transition:opacity .15s;
+    padding:11px 13px;border-radius:12px;background:rgba(3,14,16,.9);backdrop-filter:blur(8px);
+    border:1px solid var(--line);font-size:12px;line-height:1.7;box-shadow:0 8px 30px rgba(0,0,0,.6);
+    max-width:260px}
+  #tip .sid{font-family:Orbitron,sans-serif;color:var(--gold);font-size:12px;letter-spacing:.5px}
+  #tip .row{color:var(--muted)} #tip .row b{color:var(--text);font-weight:500}
+  #tip .pct{color:var(--teal);font-weight:600}
+
+  /* Data panel */
+  #panel{right:26px;top:104px;width:560px;max-width:calc(100vw - 52px);z-index:3;
+    border-radius:16px;background:var(--panel);backdrop-filter:blur(16px);border:1px solid var(--line);
+    box-shadow:0 12px 50px rgba(0,0,0,.55),inset 0 0 40px rgba(51,240,200,.04);
+    display:flex;flex-direction:column;overflow:hidden;transition:height .35s ease,opacity .3s;
+    max-height:calc(100vh - 150px)}
+  #panel.min{height:52px!important}
+  #phead{display:flex;align-items:center;gap:12px;padding:15px 18px;cursor:default;
+    border-bottom:1px solid var(--line);flex:0 0 auto}
+  #phead h2{margin:0;font-family:Orbitron,sans-serif;font-size:13px;letter-spacing:2px;color:#eafffb;flex:1}
+  #ptotal{font-size:12px;color:var(--muted)}
+  #pmin{cursor:pointer;border:none;background:rgba(51,240,200,.12);color:var(--teal);
+    width:28px;height:28px;border-radius:8px;font-size:16px;line-height:1;transition:background .2s}
+  #pmin:hover{background:rgba(51,240,200,.25)}
+  #pbody{overflow:auto;flex:1 1 auto}
+  table{border-collapse:collapse;width:100%;font-size:12.5px;font-variant-numeric:tabular-nums}
+  thead th{position:sticky;top:0;background:rgba(5,17,20,.96);backdrop-filter:blur(6px);
+    color:var(--teal);text-transform:uppercase;letter-spacing:1px;font-size:10.5px;font-weight:600;
+    padding:11px 12px;text-align:right;cursor:pointer;user-select:none;white-space:nowrap}
+  thead th:first-child{text-align:left}
+  thead th:hover{color:var(--green)}
+  tbody td{padding:9px 12px;text-align:right;border-top:1px solid rgba(70,240,205,.07);white-space:nowrap}
+  tbody td:first-child{text-align:left;color:var(--gold);font-family:Orbitron,sans-serif;font-size:11px}
+  tbody tr{transition:background .15s}
+  tbody tr:hover{background:rgba(51,240,200,.09)}
+  .dot{display:inline-block;width:8px;height:8px;border-radius:50%;margin-right:7px;vertical-align:middle;
+    box-shadow:0 0 8px currentColor}
+  #pager{display:flex;align-items:center;gap:12px;padding:12px 18px;border-top:1px solid var(--line);
+    flex:0 0 auto;font-size:12px;color:var(--muted)}
+  #pager button{cursor:pointer;border:1px solid var(--line);background:rgba(51,240,200,.08);
+    color:var(--teal);border-radius:8px;padding:6px 13px;font-size:12px;font-weight:600;transition:.2s}
+  #pager button:hover:not(:disabled){background:rgba(51,240,200,.22)}
+  #pager button:disabled{opacity:.3;cursor:default}
+  #pinfo{flex:1;text-align:center;letter-spacing:.3px}
+
+  /* Loading veil */
+  #veil{position:fixed;inset:0;z-index:5;display:flex;align-items:center;justify-content:center;
+    background:radial-gradient(circle at 50% 45%,#04121a,#010409 70%);transition:opacity .8s;pointer-events:none}
+  #veil .ring{width:54px;height:54px;border-radius:50%;border:2px solid rgba(51,240,200,.15);
+    border-top-color:var(--teal);animation:spin 1s linear infinite;box-shadow:0 0 30px rgba(51,240,200,.3)}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  #veil.hide{opacity:0}
+  #banner{position:fixed;top:0;left:0;right:0;z-index:6;padding:10px;text-align:center;
+    background:rgba(80,20,20,.9);color:#ffd7d7;font-size:13px;display:none}
+</style>
+</head>
+<body>
+<div id="scene"></div>
+
+<div id="banner"></div>
+
+<div class="hud" id="title">
+  <h1>GAIA ATLAS</h1>
+  <p>A living map of stars whose brightness stirred across the mission. Set a threshold and ignite the sky — each mote is a real Gaia source, sized by luminosity, hued from bioluminescent teal to solar gold by how much it varied.</p>
+</div>
+
+<div class="hud" id="dock">
+  <label for="x">Threshold&nbsp;X&nbsp;%</label>
+  <input id="x" type="number" value="20" min="0" step="1">
+  <button class="btn" id="go" onclick="ignite()">Ignite</button>
+  <span id="status"></span>
+</div>
+
+<div class="hud" id="hint"><b>drag</b> to orbit · <b>scroll</b> to zoom · <b>hover</b> a star for detail</div>
+
+<div id="tip"></div>
+
+<div class="hud" id="panel">
+  <div id="phead">
+    <h2>VARIABLE SOURCES</h2>
+    <span id="ptotal"></span>
+    <button id="pmin" title="minimize" onclick="toggleMin()">–</button>
+  </div>
+  <div id="pbody">
+    <table>
+      <thead><tr id="head"></tr></thead>
+      <tbody id="tbody"></tbody>
+    </table>
+  </div>
+  <div id="pager">
+    <button id="prev" onclick="go(-1)">◀ Prev</button>
+    <span id="pinfo"></span>
+    <button id="next" onclick="go(1)">Next ▶</button>
+  </div>
+</div>
+
+<div id="veil"><div class="ring"></div></div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+}}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
+// ---------- config ----------
+const API = (window.GAIA_API || "/csp/gaia/api") + "/variations";
+const GALAXY_N = 1800;          // stars rendered in 3D (top-N by % change)
+const PAGE_SIZE = 25;           // table rows per page
+const COLS = ["source_id","ra","dec","mag_max","mag_min","pct_change"];
+const LABELS = {source_id:"Source ID",ra:"RA",dec:"Dec",mag_max:"Mag max",mag_min:"Mag min",pct_change:"% change"};
+
+// ---------- three.js scene ----------
+const host = document.getElementById('scene');
+const renderer = new THREE.WebGLRenderer({antialias:true, alpha:true});
+renderer.setPixelRatio(Math.min(devicePixelRatio,2));
+renderer.setSize(innerWidth,innerHeight);
+renderer.toneMapping = THREE.ACESFilmicToneMapping;
+renderer.toneMappingExposure = 1.15;
+host.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.fog = new THREE.FogExp2(0x01060a, 0.0016);
+const camera = new THREE.PerspectiveCamera(55, innerWidth/innerHeight, 0.1, 4000);
+camera.position.set(0, 190, 300);            // 3/4 view looking down onto the disk
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.dampingFactor = 0.06;
+controls.autoRotate = true; controls.autoRotateSpeed = 0.3;
+controls.minDistance = 90; controls.maxDistance = 800;
+controls.target.set(0, 0, 0);
+
+const composer = new EffectComposer(renderer);
+composer.addPass(new RenderPass(scene, camera));
+// strength, radius, threshold — high threshold so only bright result-stars bloom
+const bloom = new UnrealBloomPass(new THREE.Vector2(innerWidth,innerHeight), 0.6, 0.4, 0.3);
+composer.addPass(bloom);
+
+// soft round sprite texture (for nebula + spores)
+function softTexture(){
+  const c = document.createElement('canvas'); c.width=c.height=128;
+  const g = c.getContext('2d');
+  const grd = g.createRadialGradient(64,64,0,64,64,64);
+  grd.addColorStop(0,'rgba(255,255,255,1)');
+  grd.addColorStop(0.25,'rgba(255,255,255,.55)');
+  grd.addColorStop(1,'rgba(255,255,255,0)');
+  g.fillStyle=grd; g.fillRect(0,0,128,128);
+  const t = new THREE.CanvasTexture(c); return t;
 }
-function find(){ page=1; pageSize=Math.max(1,parseInt(document.getElementById("pageSize").value)||100); load(); }
-function go(d){ const p=page+d; if(p>=1&&p<=pages()){ page=p; load(); } }
-find();
-</script></body></html>
+const SOFT = softTexture();
+
+// ---------- ambient backdrop: deep starfield ----------
+function starfield(){
+  const n=2600, pos=new Float32Array(n*3), col=new Float32Array(n*3);
+  const c=new THREE.Color();
+  for(let i=0;i<n;i++){
+    const r=500+Math.random()*1400, th=Math.random()*Math.PI*2, ph=Math.acos(2*Math.random()-1);
+    pos[i*3]=r*Math.sin(ph)*Math.cos(th); pos[i*3+1]=r*Math.cos(ph); pos[i*3+2]=r*Math.sin(ph)*Math.sin(th);
+    c.setHSL(0.5+Math.random()*0.14, 0.4, 0.4+Math.random()*0.25);
+    col[i*3]=c.r; col[i*3+1]=c.g; col[i*3+2]=c.b;
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  g.setAttribute('color',new THREE.BufferAttribute(col,3));
+  // dim + small so the data-driven result galaxy stays the hero
+  const m=new THREE.PointsMaterial({size:1.6,map:SOFT,vertexColors:true,transparent:true,
+    depthWrite:false,blending:THREE.AdditiveBlending,opacity:.55,sizeAttenuation:true});
+  return new THREE.Points(g,m);
+}
+scene.add(starfield());
+
+// ---------- ambient backdrop: bioluminescent spores (nature) ----------
+const spores = (()=>{
+  const n=420, pos=new Float32Array(n*3), col=new Float32Array(n*3);
+  const vel=[]; const c=new THREE.Color();
+  for(let i=0;i<n;i++){
+    const r=120+Math.random()*380, th=Math.random()*Math.PI*2, ph=Math.acos(2*Math.random()-1);
+    pos[i*3]=r*Math.sin(ph)*Math.cos(th); pos[i*3+1]=r*Math.cos(ph)*0.6; pos[i*3+2]=r*Math.sin(ph)*Math.sin(th);
+    vel.push((Math.random()-0.5)*0.05,(Math.random()-0.2)*0.04,(Math.random()-0.5)*0.05);
+    c.setHSL(0.38+Math.random()*0.1, 0.9, 0.6);
+    col[i*3]=c.r; col[i*3+1]=c.g; col[i*3+2]=c.b;
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  g.setAttribute('color',new THREE.BufferAttribute(col,3));
+  const m=new THREE.PointsMaterial({size:4.5,map:SOFT,vertexColors:true,transparent:true,
+    depthWrite:false,blending:THREE.AdditiveBlending,opacity:.7});
+  const p=new THREE.Points(g,m); p.userData.vel=vel; scene.add(p); return p;
+})();
+
+// ---------- ambient backdrop: nebula clouds ----------
+const nebula = new THREE.Group();
+// deep, symmetric, low-opacity clouds set well behind the galaxy so they read as
+// atmosphere rather than a one-sided blob
+[[0x145f52,-260,60,-360,520],[0x0c4a63,260,-60,-340,500],[0x7a5820,0,140,-420,420],
+ [0x125e50,0,-160,-380,460]].forEach(([hex,x,y,z,s])=>{
+  const m=new THREE.SpriteMaterial({map:SOFT,color:hex,transparent:true,opacity:.09,
+    depthWrite:false,blending:THREE.AdditiveBlending});
+  const sp=new THREE.Sprite(m); sp.position.set(x,y,z); sp.scale.set(s,s,1); nebula.add(sp);
+});
+scene.add(nebula);
+
+// ---------- result stars (data-driven, custom shader for per-point size + explosion) ----------
+let starPoints=null, starData=[];
+const starMat = new THREE.ShaderMaterial({
+  uniforms:{ uProg:{value:0}, uPixelRatio:{value:Math.min(devicePixelRatio,2)}, uTex:{value:SOFT} },
+  transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
+  vertexShader:`
+    uniform float uProg; uniform float uPixelRatio;
+    attribute float aSize; attribute vec3 aColor; attribute float aDelay;
+    varying vec3 vColor; varying float vE;
+    void main(){
+      vColor=aColor;
+      float e=clamp((uProg-aDelay)/0.55,0.0,1.0);
+      e=1.0-pow(1.0-e,3.0);                       // easeOutCubic — burst into being
+      vE=e;
+      vec3 p=position*e;                          // explode outward from origin
+      vec4 mv=modelViewMatrix*vec4(p,1.0);
+      gl_PointSize=aSize*uPixelRatio*(320.0/-mv.z)*(0.15+0.85*e);
+      gl_Position=projectionMatrix*mv;
+    }`,
+  fragmentShader:`
+    uniform sampler2D uTex; varying vec3 vColor; varying float vE;
+    void main(){
+      vec4 t=texture2D(uTex,gl_PointCoord);
+      if(t.a<0.02) discard;
+      // bright core (>1.0 to punch through bloom threshold) fading to colored halo
+      vec3 c = vColor*(1.4+0.8*vE) + vec3(0.25)*pow(t.a,3.0);
+      gl_FragColor=vec4(c, t.a*vE);
+    }`
+});
+
+// map % change -> color (teal 175° cool  ->  gold 45° hot), brighter at high %
+function pctColor(pct){
+  const t=Math.min(Math.max(pct,0),100)/100;
+  const c=new THREE.Color();
+  c.setHSL((175-130*t)/360, 0.85, 0.45+0.22*t);
+  return c;
+}
+
+function buildGalaxy(data){
+  if(starPoints){ scene.remove(starPoints); starPoints.geometry.dispose(); }
+  starData = data;
+  const n=data.length;
+  const pos=new Float32Array(n*3), col=new Float32Array(n*3), size=new Float32Array(n), delay=new Float32Array(n);
+  // Lay the sources out as a spiral galaxy that fills the view. Data drives it:
+  // radius from % change (most-variable stars ride the bright core), the spiral
+  // angle from index, and the real ra/dec add a unique per-star scatter so no
+  // two maps look alike. This reads as a galaxy rather than a one-sided sky patch.
+  const ARMS=4, SPREAD=0.42, RMAX=190;
+  for(let i=0;i<n;i++){
+    const d=data[i];
+    const ra=Number(d.ra), dec=Number(d.dec), mag=Number(d.mag_min), pct=Number(d.pct_change);
+    const f=i/n;                                   // 0 (most variable) .. 1
+    const rad = 16 + f*RMAX;                       // core -> rim
+    const arm = (i%ARMS)*(2*Math.PI/ARMS);
+    const swirl = rad*0.028;                        // spiral wind
+    const jit = ((ra*7.3+dec*3.1)%1);              // deterministic per-star jitter
+    const ang = arm + swirl + (jit-0.5)*SPREAD;
+    const thick = (Math.sin(ra*12.9)+Math.cos(dec*7.7))*0.5; // vertical scatter, data-driven
+    pos[i*3]   = Math.cos(ang)*rad + (jit-0.5)*10;
+    pos[i*3+1] = thick*rad*0.14 + (dec/90)*8;      // thin disk, dec tilts it
+    pos[i*3+2] = Math.sin(ang)*rad + (((ra*3.7)%1)-0.5)*10;
+    const c=pctColor(pct); col[i*3]=c.r; col[i*3+1]=c.g; col[i*3+2]=c.b;
+    size[i]= 8 + Math.max(0,(20-mag))*2.2 + pct*0.09;  // brighter & more variable = bigger
+    delay[i]= 0.5*f + Math.random()*0.12;              // core (most-variable) ignites first
+  }
+  const g=new THREE.BufferGeometry();
+  g.setAttribute('position',new THREE.BufferAttribute(pos,3));
+  g.setAttribute('aColor',new THREE.BufferAttribute(col,3));
+  g.setAttribute('aSize',new THREE.BufferAttribute(size,1));
+  g.setAttribute('aDelay',new THREE.BufferAttribute(delay,1));
+  starPoints=new THREE.Points(g,starMat);
+  starPoints.frustumCulled=false;
+  scene.add(starPoints);
+  // run the explosion
+  starMat.uniforms.uProg.value=0;
+  explodeStart=performance.now();
+}
+let explodeStart=0;
+
+// ---------- hover picking ----------
+const ray=new THREE.Raycaster(); ray.params.Points.threshold=3;
+const mouse=new THREE.Vector2(); let hoverIdx=-1;
+const tip=document.getElementById('tip');
+addEventListener('pointermove',e=>{
+  mouse.x=(e.clientX/innerWidth)*2-1; mouse.y=-(e.clientY/innerHeight)*2+1;
+  tip.style.left=(e.clientX+16)+'px'; tip.style.top=(e.clientY+16)+'px';
+});
+function pick(){
+  if(!starPoints||starMat.uniforms.uProg.value<0.9){tip.style.opacity=0;return;}
+  ray.setFromCamera(mouse,camera);
+  const hit=ray.intersectObject(starPoints);
+  if(hit.length){
+    const i=hit[0].index;
+    if(i!==hoverIdx){
+      hoverIdx=i; const d=starData[i];
+      tip.innerHTML=`<div class="sid">${d.source_id}</div>
+        <div class="row">RA <b>${(+d.ra).toFixed(4)}</b> · Dec <b>${(+d.dec).toFixed(4)}</b></div>
+        <div class="row">mag <b>${(+d.mag_min).toFixed(2)}</b> → <b>${(+d.mag_max).toFixed(2)}</b></div>
+        <div class="row">variation <span class="pct">${(+d.pct_change).toFixed(2)}%</span></div>`;
+    }
+    tip.style.opacity=1;
+  } else { hoverIdx=-1; tip.style.opacity=0; }
+}
+
+// ---------- animate ----------
+const clock=new THREE.Clock();
+function loop(){
+  requestAnimationFrame(loop);
+  const dt=clock.getDelta(), t=clock.elapsedTime;
+  // spore drift
+  const p=spores.geometry.attributes.position, v=spores.userData.vel;
+  for(let i=0;i<p.count;i++){
+    p.array[i*3]+=v[i*3]; p.array[i*3+1]+=v[i*3+1]; p.array[i*3+2]+=v[i*3+2];
+    if(Math.abs(p.array[i*3+1])>260) v[i*3+1]*=-1;
+  }
+  p.needsUpdate=true;
+  nebula.rotation.y += dt*0.01; nebula.children.forEach((s,i)=>s.material.opacity=0.13+0.05*Math.sin(t*0.4+i));
+  if(explodeStart){
+    const e=(performance.now()-explodeStart)/1800;
+    starMat.uniforms.uProg.value=Math.min(e,1);
+    if(starPoints) starPoints.rotation.y += dt*0.02;
+  }
+  controls.update();
+  pick();
+  composer.render();
+}
+loop();
+
+addEventListener('resize',()=>{
+  camera.aspect=innerWidth/innerHeight; camera.updateProjectionMatrix();
+  renderer.setSize(innerWidth,innerHeight); composer.setSize(innerWidth,innerHeight);
+});
+
+// ---------- data / table ----------
+const $=id=>document.getElementById(id);
+let page=1,total=0,tableRows=[],sortCol=null,asc=false;
+const pages=()=>Math.max(1,Math.ceil(total/PAGE_SIZE));
+
+async function fetchPage(x,pg,size){
+  const r=await fetch(`${API}?x=${encodeURIComponent(x)}&page=${pg}&pageSize=${size}`);
+  if(!r.ok) throw new Error(`HTTP ${r.status}`);
+  return r.json();
+}
+function renderTable(){
+  $('head').innerHTML=COLS.map(c=>`<th onclick="sortBy('${c}')">${LABELS[c]}</th>`).join('');
+  let rows=tableRows;
+  if(sortCol){rows=[...rows].sort((a,b)=>{const v=(parseFloat(a[sortCol])-parseFloat(b[sortCol]))||(''+a[sortCol]).localeCompare(''+b[sortCol]);return asc?v:-v;});}
+  $('tbody').innerHTML=rows.map(o=>{
+    const col=pctColor(+o.pct_change).getStyle();
+    return `<tr><td><span class="dot" style="color:${col}"></span>${o.source_id}</td>`+
+      `<td>${(+o.ra).toFixed(4)}</td><td>${(+o.dec).toFixed(4)}</td>`+
+      `<td>${(+o.mag_max).toFixed(3)}</td><td>${(+o.mag_min).toFixed(3)}</td>`+
+      `<td style="color:${col};font-weight:600">${(+o.pct_change).toFixed(2)}</td></tr>`;
+  }).join('');
+  $('pinfo').textContent=`Page ${page} / ${pages()}`;
+  $('ptotal').textContent=total?`${total.toLocaleString()} sources`:'';
+  $('prev').disabled=page<=1; $('next').disabled=page>=pages();
+}
+window.sortBy=c=>{asc=(c===sortCol)?!asc:false;sortCol=c;renderTable();};
+window.go=async d=>{const n=page+d; if(n<1||n>pages())return; page=n;
+  try{const j=await fetchPage($('x').value,page,PAGE_SIZE); tableRows=j.rows; sortCol=null; renderTable();}catch(e){setStatus('Error: '+e.message,true);}};
+
+function setStatus(t,err){const s=$('status'); s.textContent=t; s.className=err?'err':'';}
+
+window.ignite=async()=>{
+  const x=$('x').value;
+  setStatus('scanning the sky…');
+  try{
+    // galaxy sample (top-N by % change) + first table page, in parallel
+    const [galaxy,tablePage]=await Promise.all([
+      fetchPage(x,1,GALAXY_N),
+      fetchPage(x,1,PAGE_SIZE)
+    ]);
+    total=galaxy.total; page=1; tableRows=tablePage.rows; sortCol=null;
+    buildGalaxy(galaxy.rows);
+    renderTable();
+    setStatus(`${total.toLocaleString()} sources · igniting ${galaxy.rows.length.toLocaleString()}`);
+  }catch(e){ setStatus('Error: '+e.message,true); }
+};
+window.toggleMin=()=>{const p=$('panel'); p.classList.toggle('min');
+  $('pmin').textContent=p.classList.contains('min')?'+':'–';};
+
+// reveal + first ignite
+function ready(){ $('veil').classList.add('hide'); setTimeout(()=>$('veil').style.display='none',900); ignite(); }
+if(document.readyState!=='loading') ready(); else addEventListener('DOMContentLoaded',ready);
+window.__galaxyReady=true;
+</script>
+<script>
+// Fallback banner if the 3D modules fail to load (e.g. offline / CDN blocked).
+setTimeout(()=>{ if(!window.__galaxyReady){
+  const b=document.getElementById('banner');
+  b.style.display='block';
+  b.textContent='3D engine could not load (offline?). The data table still works.';
+}},9000);
+</script>
+</body>
+</html>
