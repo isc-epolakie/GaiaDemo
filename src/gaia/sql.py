@@ -14,7 +14,7 @@ _STD = "SQRT(phot_g_n_obs)*phot_g_mean_flux_error"          # per-epoch flux sca
 _FLUX = "phot_g_mean_flux"
 _PCT = f"LEAST({_STD} / {_FLUX}, 1.0) * 100"                 # capped at 100%
 
-def build_query(x: float, *, limit: int | None = None) -> str:
+def build_query(x: float, *, limit: int | None = None, table: str = TABLE) -> str:
     x = float(x)
     top = f"TOP {int(limit)} " if limit else ""
     # floor flux-std to flux*0.001 to keep LOG10 in-domain when scatter >= flux
@@ -27,7 +27,7 @@ SELECT {top}source_id, ra, "dec", mag_max, mag_min, pct_change FROM (
         phot_g_mean_mag + 2.5*LOG10({_FLUX} / GREATEST({_FLUX} - {_STD}, {_FLUX}*0.001)) AS mag_max,
         phot_g_mean_mag - 2.5*LOG10(({_FLUX} + {_STD}) / {_FLUX})                         AS mag_min,
         {_PCT}                                                                           AS pct_change
-    FROM {TABLE}
+    FROM {table}
     WHERE {_FLUX} > 0 AND phot_g_n_obs > 0 AND phot_g_mean_flux_error IS NOT NULL
 )
 WHERE pct_change >= {x}
