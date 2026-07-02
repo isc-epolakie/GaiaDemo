@@ -59,8 +59,18 @@
   /* page sections */
   #hero{height:100vh;pointer-events:none}
   #data{position:relative;z-index:2;min-height:100vh;display:flex;flex-direction:column;
-    align-items:center;justify-content:center;padding:70px 20px 90px;
+    align-items:center;justify-content:flex-start;padding:96px 20px 90px;
     background:linear-gradient(180deg,rgba(4,6,12,0) 0%,rgba(4,6,12,.78) 22%,rgba(4,6,12,.92) 100%)}
+  /* data-view control bar: Back-to-sky + a threshold query, sits above the panel */
+  #databar{width:780px;max-width:calc(100vw - 40px);display:flex;align-items:center;gap:16px;
+    margin-bottom:20px;opacity:0;transform:translateY(24px);transition:opacity .6s ease,transform .6s ease}
+  body.at-data #databar{opacity:1;transform:none}
+  #databar #dbquery{margin-left:auto;display:flex;align-items:center;gap:12px;padding:8px 14px;
+    border-radius:12px;background:var(--panel);backdrop-filter:blur(14px);border:1px solid var(--line)}
+  #databar #dbquery label{font-size:11px;letter-spacing:1.2px;text-transform:uppercase;color:var(--muted)}
+  #databar #dbquery input{width:74px;background:rgba(0,0,0,.35);border:1px solid var(--line);color:var(--text);
+    border-radius:8px;padding:8px 10px;font-size:14px;outline:none;font-family:inherit}
+  #databar #dbquery input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(122,162,255,.18)}
 
   #panel{width:780px;max-width:calc(100vw - 40px);border-radius:16px;background:var(--panel);
     backdrop-filter:blur(18px);border:1px solid var(--line);overflow:hidden;
@@ -89,9 +99,9 @@
   #pager button:hover:not(:disabled){background:rgba(122,162,255,.2)}
   #pager button:disabled{opacity:.3;cursor:default}
   #pinfo{flex:1;text-align:center}
-  #backup{margin-top:26px;cursor:pointer;background:none;border:1px solid var(--line);
+  #backup{cursor:pointer;background:none;border:1px solid var(--line);
     color:var(--muted);font-family:inherit;font-size:11px;letter-spacing:2px;text-transform:uppercase;
-    padding:10px 20px;border-radius:10px;transition:.2s}
+    padding:11px 20px;border-radius:10px;transition:.2s;white-space:nowrap}
   #backup:hover{color:var(--text);border-color:var(--accent)}
 
   /* tooltip */
@@ -126,6 +136,14 @@
 <main>
   <section id="hero"></section>
   <section id="data">
+    <div id="databar">
+      <button id="backup" onclick="backToSky()">Back to the sky</button>
+      <div id="dbquery">
+        <label for="x2">Threshold X %</label>
+        <input id="x2" type="number" value="20" min="0" step="1">
+        <button class="btn" style="padding:9px 18px;font-size:12px" onclick="reveal(true)">Query</button>
+      </div>
+    </div>
     <div id="panel">
       <div id="phead">
         <h2>VARIABLE SOURCES</h2>
@@ -141,7 +159,6 @@
         <button id="next" onclick="go(1)">Next</button>
       </div>
     </div>
-    <button id="backup" onclick="scrollTo({top:0,behavior:'smooth'})">Back to the sky</button>
   </section>
 </main>
 
@@ -311,7 +328,7 @@ const starMat = new THREE.ShaderMaterial({
     varying vec3 vColor; varying float vE;
     void main(){
       vColor=aColor;
-      float e=clamp((uProg-aDelay)/0.5,0.0,1.0);
+      float e=clamp((uProg-aDelay)/0.28,0.0,1.0);
       e=1.0-pow(1.0-e,3.0);
       vE=e;
       vec3 p=aHome*e;
@@ -373,7 +390,7 @@ function buildGalaxy(data){
     const pct=+data[i].pct_change, mag=+data[i].mag_min;
     const c=pctColor(pct); col[i*3]=c.r;col[i*3+1]=c.g;col[i*3+2]=c.b;
     size[i]=7+Math.max(0,(20-mag))*2.0+pct*0.08;
-    delay[i]=0.5*(i/n)+rng()*0.12;
+    delay[i]=0.72*(i/n)+rng()*0.18;   // brightest/most-variable ignite first, in waves
   }
   const g=new THREE.BufferGeometry();
   g.setAttribute('aHome',new THREE.BufferAttribute(pos,3));
@@ -445,7 +462,7 @@ function loop(){
     sp.material.opacity=sp.userData.base*k;
   });
   if(explodeStart){
-    starMat.uniforms.uProg.value=Math.min((performance.now()-explodeStart)/1900,1);
+    starMat.uniforms.uProg.value=Math.min((performance.now()-explodeStart)/3000,1);
     if(starPoints) starPoints.rotation.y+=dt*0.015;
   }
   nebulaGroup.rotation.y+=dt*0.01;
@@ -461,8 +478,8 @@ addEventListener('resize',()=>{
 const $=id=>document.getElementById(id);
 let page=1,total=0,tableRows=[],sortCol=null,asc=false;
 const pages=()=>Math.max(1,Math.ceil(total/PAGE_SIZE));
-async function fetchPage(x,pg,size){
-  const r=await fetch(`${API}?x=${encodeURIComponent(x)}&page=${pg}&pageSize=${size}`);
+async function fetchPage(x,pg,size,withCount=true){
+  const r=await fetch(`${API}?x=${encodeURIComponent(x)}&page=${pg}&pageSize=${size}&count=${withCount?1:0}`);
   if(!r.ok) throw new Error(`HTTP ${r.status}`); return r.json();
 }
 function renderTable(){
@@ -478,24 +495,32 @@ function renderTable(){
   $('ptotal').textContent=total?`${total.toLocaleString()} sources`:'';
   $('prev').disabled=page<=1; $('next').disabled=page>=pages();
 }
+let curX=20;
 window.sortBy=c=>{asc=(c===sortCol)?!asc:false;sortCol=c;renderTable();};
 window.go=async d=>{const nn=page+d;if(nn<1||nn>pages())return;page=nn;
-  try{const j=await fetchPage($('x').value,page,PAGE_SIZE);tableRows=j.rows;sortCol=null;renderTable();}
+  try{const j=await fetchPage(curX,page,PAGE_SIZE,false);tableRows=j.rows;sortCol=null;renderTable();}
   catch(e){setStatus('Error: '+e.message,true);}};
 function setStatus(t,err){const s=$('status');s.textContent=t;s.className=err?'err':'';}
 
 let statusTimer=null;
-window.reveal=async()=>{
-  const x=$('x').value; clearTimeout(statusTimer); setStatus('scanning the sky ...');
+window.reveal=async(fromData)=>{
+  const x=(fromData?$('x2'):$('x')).value;
+  $('x').value=x; $('x2').value=x; curX=x;      // keep both inputs in sync
+  clearTimeout(statusTimer); setStatus('scanning the sky ...');
   try{
-    const [galaxy,tablePage]=await Promise.all([fetchPage(x,1,GALAXY_N),fetchPage(x,1,PAGE_SIZE)]);
+    // First call warms the server-side cache; after that every query is instant.
+    // We fetch the galaxy sample + the first table page together, then the shader
+    // staggers the stars so they pop into existence in waves over ~2.5s.
+    const [galaxy,tablePage]=await Promise.all([
+      fetchPage(x,1,GALAXY_N,true), fetchPage(x,1,PAGE_SIZE,false)]);
     total=galaxy.total; page=1; tableRows=tablePage.rows; sortCol=null;
     buildGalaxy(galaxy.rows); renderTable();
-    // brief confirmation, then fade out (the count also lives on the table header)
     setStatus(`${total.toLocaleString()} sources found`);
     statusTimer=setTimeout(()=>setStatus(''),2600);
   }catch(e){setStatus('Error: '+e.message,true);}
 };
+
+window.backToSky=()=>window.scrollTo({top:0,behavior:'smooth'});
 
 // Retract the fixed hero UI (title + controls) once the viewer scrolls toward
 // the data section, so nothing overlaps the panel. Threshold ~35% of a screen.

@@ -1,7 +1,7 @@
 /// REST broker for the Gaia brightness-variation results, with server-side
 /// pagination.
 ///
-/// The proxy SQL here MUST stay identical to src/gaia/sql.py (build_query) —
+/// The proxy SQL here MUST stay identical to src/gaia/sql.py (build_query);
 /// the two are kept in lock-step by hand. We inline the SQL in ObjectScript
 /// (rather than importing src.gaia.sql via %SYS.Python) because embedded-Python
 /// import of the bind-mounted module hangs intermittently on the Community
@@ -36,9 +36,44 @@ ClassMethod ProxySQL() As %String
     _") WHERE pct_change >= ?"
 }
 
-/// GET /variations?x=NN&page=P&pageSize=S
+/// Materialise the proxy once into an indexed cache table (Gaia.Variation) so
+/// paging reads an ordered slice instead of recomputing the LOG10/SQRT proxy and
+/// re-sorting all ~655k rows on every request (~3.5s -> ~0.3s per page). The
+/// cache is rebuilt only when it is missing or Gaia.Source's row count changed
+/// (e.g. after a data reload), tracked in the ^GaiaCache global.
+ClassMethod EnsureCache() As %Status
+{
+  Set srcCnt = 0
+  Set r = ##class(%SQL.Statement).%ExecDirect(,"SELECT COUNT(*) FROM Gaia.Source")
+  If r.%Next() { Set srcCnt = r.%GetData(1) }
+  Set haveTbl = ##class(%Dictionary.CompiledClass).%ExistsId("Gaia.Variation")
+  If haveTbl && ($Get(^GaiaCache("srcCount")) = srcCnt) { Quit $$$OK }   // fresh
+
+  // (re)build from the canonical proxy (x=0 => every valid source)
+  Do ##class(%SQL.Statement).%ExecDirect(,"DROP TABLE IF EXISTS Gaia.Variation")
+  Set c = ##class(%SQL.Statement).%ExecDirect(,
+    "CREATE TABLE Gaia.Variation (source_id BIGINT, ra DOUBLE, ""dec"" DOUBLE, "
+    _"mag_max DOUBLE, mag_min DOUBLE, pct_change DOUBLE)")
+  If c.%SQLCODE < 0 { $$$ThrowStatus($$$ERROR($$$GeneralError,"cache create: "_c.%Message)) }
+  Set proxy = ..ProxySQL0()   // proxy body with the >= 0 threshold inlined
+  Set i = ##class(%SQL.Statement).%ExecDirect(,"INSERT INTO Gaia.Variation "_proxy)
+  If i.%SQLCODE < 0 { $$$ThrowStatus($$$ERROR($$$GeneralError,"cache fill: "_i.%Message)) }
+  Do ##class(%SQL.Statement).%ExecDirect(,"CREATE INDEX idxPct ON Gaia.Variation (pct_change)")
+  Set ^GaiaCache("srcCount") = srcCnt
+  Quit $$$OK
+}
+
+/// ProxySQL() with the bind parameter replaced by the literal 0, used to fill
+/// the cache with all valid sources. Kept in sync with ProxySQL by construction.
+ClassMethod ProxySQL0() As %String
+{
+  Quit $Replace(..ProxySQL(), "pct_change >= ?", "pct_change >= 0")
+}
+
+/// GET /variations?x=NN&page=P&pageSize=S[&count=0]
 /// Returns {"x":N,"page":P,"pageSize":S,"total":T,"rows":[{...6 fields...}]}
 /// sorted by pct_change desc. page is 1-based; pageSize is clamped to [1,5000].
+/// count=0 skips the total (returns -1) for faster paging.
 ClassMethod Variations() As %Status
 {
   // Validate params -> sane defaults (a non-numeric ?x=abc must not 500).
@@ -52,21 +87,27 @@ ClassMethod Variations() As %Status
   Set pageSize = pageSize \ 1
   Set:pageSize<1 pageSize = 1
   Set:pageSize>5000 pageSize = 5000          // cap keeps %ToJSON() under the string stack
-  Set proxy = ..ProxySQL()
+  Set doCount = $Get(%request.Data("count",1), 1)
 
-  // total matching rows (for the UI's paging controls)
-  Set cStmt = ##class(%SQL.Statement).%New()
-  $$$ThrowOnError(cStmt.%Prepare("SELECT COUNT(*) FROM ("_proxy_")"))
-  Set cRs = cStmt.%Execute(x)
-  Do cRs.%Next()
-  Set total = cRs.%GetData(1)
+  $$$ThrowOnError(..EnsureCache())          // fast no-op when already fresh
 
-  // one page, via ROW_NUMBER() window over the sorted proxy
+  Set total = -1
+  If doCount {
+    Set cStmt = ##class(%SQL.Statement).%New()
+    $$$ThrowOnError(cStmt.%Prepare("SELECT COUNT(*) FROM Gaia.Variation WHERE pct_change >= ?"))
+    Set cRs = cStmt.%Execute(x)
+    Do cRs.%Next()
+    Set total = cRs.%GetData(1)
+  }
+
+  // one page: indexed slice of the cached, pre-sorted variation table
   Set lo = ((page - 1) * pageSize) + 1
   Set hi = page * pageSize
   Set pStmt = ##class(%SQL.Statement).%New()
   Set pSql = "SELECT source_id, ra, ""dec"", mag_max, mag_min, pct_change FROM ("
-    _"SELECT p.*, ROW_NUMBER() OVER (ORDER BY pct_change DESC) AS rn FROM ("_proxy_") p"
+    _"SELECT source_id, ra, ""dec"", mag_max, mag_min, pct_change, "
+    _"ROW_NUMBER() OVER (ORDER BY pct_change DESC) AS rn "
+    _"FROM Gaia.Variation WHERE pct_change >= ?"
     _") WHERE rn BETWEEN ? AND ?"
   $$$ThrowOnError(pStmt.%Prepare(pSql))
   Set rs = pStmt.%Execute(x, lo, hi)
