@@ -195,7 +195,13 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 
 const API = (window.GAIA_API || "/csp/gaia/api") + "/variations";
 const GALAXY_N = 2000;
-const PAGE_SIZE = 25;
+// Rows per page adapt to viewport height so the (now non-scrolling) panel fits
+// on screen: subtract chrome (title bar, databar, header, pager, padding) and
+// divide by row height, clamped to a sane range.
+function computePageSize(){
+  return Math.max(6, Math.min(30, Math.floor((innerHeight - 360) / 30)));
+}
+let PAGE_SIZE = computePageSize();
 const COLS = ["source_id","ra","dec","mag_max","mag_min","pct_change"];
 const LABELS = {source_id:"Source ID",ra:"RA",dec:"Dec",mag_max:"Mag max",mag_min:"Mag min",pct_change:"% change"};
 
@@ -503,6 +509,22 @@ window.go=async d=>{const nn=page+d;if(nn<1||nn>pages())return;page=nn;
   try{const j=await fetchPage(curX,page,PAGE_SIZE,false);tableRows=j.rows;sortCol=null;renderTable();}
   catch(e){setStatus('Error: '+e.message,true);}};
 function setStatus(t,err){const s=$('status');s.textContent=t;s.className=err?'err':'';}
+
+// Re-fit rows per page when the window resizes (debounced). Refetch the current
+// page at the new size and re-anchor to keep the top row roughly stable.
+let resizeTimer=null;
+addEventListener('resize',()=>{
+  clearTimeout(resizeTimer);
+  resizeTimer=setTimeout(async()=>{
+    const ns=computePageSize();
+    if(ns===PAGE_SIZE) return;
+    const firstRow=(page-1)*PAGE_SIZE;      // keep the same starting row visible
+    PAGE_SIZE=ns;
+    page=Math.floor(firstRow/PAGE_SIZE)+1;
+    try{const j=await fetchPage(curX,page,PAGE_SIZE,false);tableRows=j.rows;sortCol=null;renderTable();}
+    catch(e){setStatus('Error: '+e.message,true);}
+  },250);
+});
 
 let statusTimer=null;
 window.reveal=async(fromData)=>{
