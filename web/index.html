@@ -72,17 +72,19 @@
     border-radius:8px;padding:8px 10px;font-size:14px;outline:none;font-family:inherit}
   #databar #dbquery input:focus{border-color:var(--accent);box-shadow:0 0 0 3px rgba(122,162,255,.18)}
 
+  /* No inner scroll: the panel grows to fit its 25-row page, so the table moves
+     with the single page scroll instead of trapping momentum in a nested area. */
   #panel{width:780px;max-width:calc(100vw - 40px);border-radius:16px;background:var(--panel);
     backdrop-filter:blur(18px);border:1px solid var(--line);overflow:hidden;
-    box-shadow:0 20px 70px rgba(0,0,0,.6);display:flex;flex-direction:column;max-height:82vh;
+    box-shadow:0 20px 70px rgba(0,0,0,.6);display:flex;flex-direction:column;
     opacity:0;transform:translateY(40px);transition:opacity .6s ease,transform .6s ease}
   body.at-data #panel{opacity:1;transform:none}
   #phead{display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid var(--line)}
   #phead h2{margin:0;font-size:13px;font-weight:600;letter-spacing:2.5px;color:#fff;flex:1}
   #ptotal{font-size:12px;color:var(--muted)}
-  #pbody{overflow:auto;flex:1 1 auto}
+  #pbody{overflow:visible}
   table{border-collapse:collapse;width:100%;font-size:12.5px;font-variant-numeric:tabular-nums}
-  thead th{position:sticky;top:0;background:rgba(9,12,22,.97);color:var(--accent);
+  thead th{background:rgba(9,12,22,.97);color:var(--accent);
     text-transform:uppercase;letter-spacing:1px;font-size:10.5px;font-weight:600;
     padding:12px;text-align:right;cursor:pointer;user-select:none;white-space:nowrap}
   thead th:first-child{text-align:left}
