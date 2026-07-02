@@ -199,7 +199,7 @@ const GALAXY_N = 2000;
 // on screen: subtract chrome (title bar, databar, header, pager, padding) and
 // divide by row height, clamped to a sane range.
 function computePageSize(){
-  return Math.max(6, Math.min(30, Math.floor((innerHeight - 360) / 30)));
+  return Math.max(6, Math.min(20, Math.floor((innerHeight - 360) / 30)));
 }
 let PAGE_SIZE = computePageSize();
 const COLS = ["source_id","ra","dec","mag_max","mag_min","pct_change"];
