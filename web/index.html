@@ -474,48 +474,7 @@ function buildGalaxy(data){
   starMat.uniforms.uProg.value=0; explodeStart=performance.now();
 }
 
-// ---- supernova events: rare expanding coloured rings that fade over ~6-9s ----
-let clusterCentroids=[];
-function ringTexture(){
-  const c=document.createElement('canvas'); c.width=c.height=128; const g=c.getContext('2d');
-  const grd=g.createRadialGradient(64,64,30,64,64,64);
-  grd.addColorStop(0,'rgba(255,255,255,0)'); grd.addColorStop(.72,'rgba(255,255,255,0)');
-  grd.addColorStop(.85,'rgba(255,255,255,.95)'); grd.addColorStop(1,'rgba(255,255,255,0)');
-  g.fillStyle=grd; g.fillRect(0,0,128,128);
-  return new THREE.CanvasTexture(c);
-}
-const RING=ringTexture();
-const supernovae=[];   // {ring, core, t, dur, maxScale, x,y,z}
-function spawnSupernova(){
-  if(!clusterCentroids.length) return;
-  const cc=clusterCentroids[Math.floor(Math.random()*clusterCentroids.length)];
-  const jx=(Math.random()-.5)*60, jy=(Math.random()-.5)*60, jz=(Math.random()-.5)*60;
-  const hue=Math.random(); const col=new THREE.Color().setHSL((0.55+0.4*hue)%1,0.8,0.6);
-  const ringMat=new THREE.SpriteMaterial({map:RING,color:col,transparent:true,opacity:0,
-    depthWrite:false,blending:THREE.AdditiveBlending});
-  const ring=new THREE.Sprite(ringMat); ring.position.set(cc[0]+jx,cc[1]+jy,cc[2]+jz); ring.scale.set(1,1,1);
-  const coreMat=new THREE.SpriteMaterial({map:SOFT,color:col,transparent:true,opacity:0,
-    depthWrite:false,blending:THREE.AdditiveBlending});
-  const core=new THREE.Sprite(coreMat); core.position.copy(ring.position); core.scale.set(1,1,1);
-  scene.add(ring); scene.add(core);
-  supernovae.push({ring,core,t:0,dur:6+Math.random()*3,maxScale:70+Math.random()*80,
-    x:ring.position.x,y:ring.position.y,z:ring.position.z});
-}
-let nextNova=6+Math.random()*10;   // seconds until first event
-function updateSupernovae(dt){
-  nextNova-=dt;
-  if(nextNova<=0){ spawnSupernova(); nextNova=12+Math.random()*20; }  // infrequent
-  for(let i=supernovae.length-1;i>=0;i--){
-    const s=supernovae[i]; s.t+=dt; const p=s.t/s.dur;
-    if(p>=1){ scene.remove(s.ring); scene.remove(s.core);
-      s.ring.material.dispose(); s.core.material.dispose(); supernovae.splice(i,1); continue; }
-    const ease=1-Math.pow(1-p,2);
-    const rs=1+ease*s.maxScale; s.ring.scale.set(rs,rs,1);
-    s.ring.material.opacity=Math.sin(p*Math.PI)*0.8;         // fade in then out
-    const cs=(1-p)*18+2; s.core.scale.set(cs,cs,1);
-    s.core.material.opacity=Math.max(0,1-p*2.2)*0.95;        // bright flash, quick fade
-  }
-}
+let clusterCentroids=[];   // cluster centres (kept for potential future ambient use)
 
 // ---- hover picking ----
 const ray=new THREE.Raycaster(); ray.params.Points.threshold=4;
@@ -573,7 +532,6 @@ function loop(){
     if(starPoints) starPoints.rotation.y+=dt*0.015;
   }
   starMat.uniforms.uTime.value=clock.elapsedTime;   // drives the twinkle pulse
-  updateSupernovae(dt);
   nebulaGroup.rotation.y+=dt*0.01;
   controls.update();
   if(pickDirty){ pick(); pickDirty=false; }          // raycast only after mouse move
@@ -675,21 +633,33 @@ window.__galaxyReady=true;
   function fly(){
     if(document.hidden){ setTimeout(fly, 4000); return; }
     const W=innerWidth,H=innerHeight;
-    // random entry on the top/left edges heading down-right-ish, random slope
+    // random entry on the top or left edge, general heading down-and-across
     const fromLeft=Math.random()<0.5;
     const sx=fromLeft?-200:Math.random()*W*0.6, sy=fromLeft?Math.random()*H*0.5:-160;
-    const ang=(15+Math.random()*40)*Math.PI/180;         // shallow-ish descent
+    const ang=(15+Math.random()*40)*Math.PI/180;
     const dist=Math.hypot(W,H)+400;
     const ex=sx+Math.cos(ang)*dist, ey=sy+Math.sin(ang)*dist;
-    const deg=ang*180/Math.PI;
+    // quadratic Bezier control point pushed perpendicular to the chord so the
+    // path bows into a gentle arc (random side + curvature)
+    const mx=(sx+ex)/2, my=(sy+ey)/2;
+    const nx=-Math.sin(ang), ny=Math.cos(ang);
+    const bow=(Math.random()<0.5?-1:1)*(dist*(0.10+Math.random()*0.14));
+    const cx=mx+nx*bow, cy=my+ny*bow;
     const dur=5200+Math.random()*4200;                    // slow: 5-9.4s
-    el.style.transform=`translate3d(${sx}px,${sy}px,0) rotate(${deg}deg)`;
-    el.animate([
-      {transform:`translate3d(${sx}px,${sy}px,0) rotate(${deg}deg)`, opacity:0},
-      {opacity:.9, offset:.12},
-      {opacity:.9, offset:.85},
-      {transform:`translate3d(${ex}px,${ey}px,0) rotate(${deg}deg)`, opacity:0}
-    ],{duration:dur, easing:'linear'});
+    // sample the curve into keyframes; rotate the tail along the local tangent
+    const N=16, frames=[];
+    let px=sx, py=sy;
+    for(let i=0;i<=N;i++){
+      const t=i/N, u=1-t;
+      const x=u*u*sx+2*u*t*cx+t*t*ex;
+      const y=u*u*sy+2*u*t*cy+t*t*ey;
+      const deg=Math.atan2(y-py,x-px)*180/Math.PI; px=x; py=y;
+      let op=0.9; if(t<0.12) op=t/0.12*0.9; else if(t>0.85) op=(1-t)/0.15*0.9;
+      frames.push({offset:t, opacity:op, transform:`translate3d(${x}px,${y}px,0) rotate(${deg}deg)`});
+    }
+    frames[0].opacity=0; frames[N].opacity=0;
+    el.style.transform=frames[0].transform;
+    el.animate(frames,{duration:dur, easing:'linear'});
     setTimeout(fly, dur + 9000 + Math.random()*22000);    // infrequent gaps
   }
   setTimeout(fly, 6000 + Math.random()*8000);
