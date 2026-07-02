@@ -21,13 +21,16 @@
   #scene{position:fixed;inset:0;z-index:0}
 
   /* fixed overlays */
-  #title{position:fixed;top:26px;left:32px;z-index:3;max-width:44ch;pointer-events:none}
+  #title{position:fixed;top:26px;left:32px;z-index:3;max-width:44ch;pointer-events:none;
+    transition:opacity .45s ease}
   #title h1{margin:0;font-weight:300;font-size:24px;letter-spacing:8px;color:#fff}
   #title h1 b{font-weight:600}
   #title p{margin:8px 0 0;font-size:13px;line-height:1.55;color:var(--muted);letter-spacing:.2px;font-weight:300}
 
   #controls{position:fixed;left:50%;bottom:30px;transform:translateX(-50%);z-index:4;
-    display:flex;flex-direction:column;align-items:center;gap:14px}
+    display:flex;flex-direction:column;align-items:center;gap:14px;transition:opacity .45s ease}
+  /* when scrolled into the data section, retract the fixed hero UI so nothing overlaps */
+  body.at-data #title,body.at-data #controls{opacity:0;pointer-events:none}
   #dock{display:flex;align-items:center;gap:14px;padding:12px 16px;border-radius:14px;
     background:var(--panel);backdrop-filter:blur(16px);border:1px solid var(--line);
     box-shadow:0 10px 40px rgba(0,0,0,.5)}
@@ -61,7 +64,9 @@
 
   #panel{width:780px;max-width:calc(100vw - 40px);border-radius:16px;background:var(--panel);
     backdrop-filter:blur(18px);border:1px solid var(--line);overflow:hidden;
-    box-shadow:0 20px 70px rgba(0,0,0,.6);display:flex;flex-direction:column;max-height:82vh}
+    box-shadow:0 20px 70px rgba(0,0,0,.6);display:flex;flex-direction:column;max-height:82vh;
+    opacity:0;transform:translateY(40px);transition:opacity .6s ease,transform .6s ease}
+  body.at-data #panel{opacity:1;transform:none}
   #phead{display:flex;align-items:center;gap:14px;padding:16px 20px;border-bottom:1px solid var(--line)}
   #phead h2{margin:0;font-size:13px;font-weight:600;letter-spacing:2.5px;color:#fff;flex:1}
   #ptotal{font-size:12px;color:var(--muted)}
@@ -479,15 +484,26 @@ window.go=async d=>{const nn=page+d;if(nn<1||nn>pages())return;page=nn;
   catch(e){setStatus('Error: '+e.message,true);}};
 function setStatus(t,err){const s=$('status');s.textContent=t;s.className=err?'err':'';}
 
+let statusTimer=null;
 window.reveal=async()=>{
-  const x=$('x').value; setStatus('scanning the sky ...');
+  const x=$('x').value; clearTimeout(statusTimer); setStatus('scanning the sky ...');
   try{
     const [galaxy,tablePage]=await Promise.all([fetchPage(x,1,GALAXY_N),fetchPage(x,1,PAGE_SIZE)]);
     total=galaxy.total; page=1; tableRows=tablePage.rows; sortCol=null;
     buildGalaxy(galaxy.rows); renderTable();
+    // brief confirmation, then fade out — the count also lives on the table header
     setStatus(`${total.toLocaleString()} sources found`);
+    statusTimer=setTimeout(()=>setStatus(''),2600);
   }catch(e){setStatus('Error: '+e.message,true);}
 };
+
+// Retract the fixed hero UI (title + controls) once the viewer scrolls toward
+// the data section, so nothing overlaps the panel. Threshold ~35% of a screen.
+function onScroll(){
+  document.body.classList.toggle('at-data', scrollY > innerHeight*0.35);
+}
+addEventListener('scroll', onScroll, {passive:true});
+onScroll();
 window.toggleMin=()=>{const b=$('pbody'),g=$('pager'),btn=$('pmin');
   const hidden=b.style.display==='none';
   b.style.display=hidden?'':'none'; g.style.display=hidden?'':'none';
