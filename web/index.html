@@ -277,20 +277,48 @@ const SOFT = softTexture();
 // Pillars-of-Creation inspired gas palette
 const NEB = [0x3a5a8c,0x8c5a2b,0xc99b5a,0x2e6d63,0x9c5566,0x6a4a8c,0xb8825a,0x40708f];
 
-// ---- ambient starfield (kept: looks great) ----
+// ---- ambient starfield with per-star twinkle (the background stars flicker) ----
+let starfieldMat=null;
 (function starfield(){
-  const n=2800, pos=new Float32Array(n*3), col=new Float32Array(n*3), c=new THREE.Color();
+  const n=2800, pos=new Float32Array(n*3), col=new Float32Array(n*3),
+        phase=new Float32Array(n), rate=new Float32Array(n), c=new THREE.Color();
   for(let i=0;i<n;i++){
     const r=600+Math.random()*2000, th=Math.random()*Math.PI*2, ph=Math.acos(2*Math.random()-1);
     pos[i*3]=r*Math.sin(ph)*Math.cos(th); pos[i*3+1]=r*Math.cos(ph); pos[i*3+2]=r*Math.sin(ph)*Math.sin(th);
     const h=Math.random(); c.setHSL(h<.5?0.6:0.06, 0.35, 0.55+Math.random()*0.3);  // blue & warm whites
     col[i*3]=c.r; col[i*3+1]=c.g; col[i*3+2]=c.b;
+    phase[i]=Math.random()*6.28; rate[i]=0.6+Math.random()*2.4;   // each star flickers on its own clock
   }
   const g=new THREE.BufferGeometry();
   g.setAttribute('position',new THREE.BufferAttribute(pos,3));
-  g.setAttribute('color',new THREE.BufferAttribute(col,3));
-  scene.add(new THREE.Points(g,new THREE.PointsMaterial({size:1.7,map:SOFT,vertexColors:true,
-    transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,opacity:.7,sizeAttenuation:true})));
+  g.setAttribute('aColor',new THREE.BufferAttribute(col,3));
+  g.setAttribute('aPhase',new THREE.BufferAttribute(phase,1));
+  g.setAttribute('aRate',new THREE.BufferAttribute(rate,1));
+  starfieldMat=new THREE.ShaderMaterial({
+    uniforms:{uTime:{value:0}, uPixelRatio:{value:PIXR}, uTex:{value:SOFT}},
+    transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
+    vertexShader:`
+      uniform float uTime; uniform float uPixelRatio;
+      attribute vec3 aColor; attribute float aPhase; attribute float aRate;
+      varying vec3 vColor; varying float vTw;
+      void main(){
+        vColor=aColor;
+        // deep twinkle: dips toward ~0.2 and peaks ~1.0, irregular via two sines
+        float s=0.6*sin(uTime*aRate+aPhase)+0.4*sin(uTime*aRate*0.53+aPhase*1.7);
+        vTw=0.55+0.45*s;
+        vec4 mv=modelViewMatrix*vec4(position,1.0);
+        gl_PointSize=(1.4+1.4*vTw)*uPixelRatio*(600.0/-mv.z);
+        gl_Position=projectionMatrix*mv;
+      }`,
+    fragmentShader:`
+      uniform sampler2D uTex; varying vec3 vColor; varying float vTw;
+      void main(){
+        vec4 t=texture2D(uTex,gl_PointCoord);
+        if(t.a<0.02) discard;
+        gl_FragColor=vec4(vColor*(0.5+0.9*vTw), t.a*(0.35+0.65*vTw));
+      }`
+  });
+  scene.add(new THREE.Points(g,starfieldMat));
 })();
 
 // ---- ambient far background gas so the void isn't pure black ----
@@ -360,35 +388,29 @@ let starPoints=null, starData=[], nebulaGroup=new THREE.Group();
 scene.add(nebulaGroup);
 
 const starMat = new THREE.ShaderMaterial({
-  uniforms:{ uProg:{value:0}, uPixelRatio:{value:PIXR}, uTex:{value:SOFT}, uTime:{value:0} },
+  uniforms:{ uProg:{value:0}, uPixelRatio:{value:PIXR}, uTex:{value:SOFT} },
   transparent:true, depthWrite:false, blending:THREE.AdditiveBlending,
   vertexShader:`
-    uniform float uProg; uniform float uPixelRatio; uniform float uTime;
+    uniform float uProg; uniform float uPixelRatio;
     attribute float aSize; attribute vec3 aColor; attribute float aDelay; attribute vec3 aHome;
-    attribute float aTwinkle;   // 0 = steady; >0 = phase offset for pulsing constellations
-    varying vec3 vColor; varying float vE; varying float vTw;
+    varying vec3 vColor; varying float vE;
     void main(){
       vColor=aColor;
       float e=clamp((uProg-aDelay)/0.28,0.0,1.0);
       e=1.0-pow(1.0-e,3.0);
       vE=e;
-      // gentle irregular pulse: two detuned sines so it never repeats cleanly
-      float tw = aTwinkle>0.0
-        ? 0.72 + 0.28*(0.6*sin(uTime*1.7+aTwinkle)+0.4*sin(uTime*0.9+aTwinkle*2.3))
-        : 1.0;
-      vTw = tw;
       vec3 p=aHome*e;
       vec4 mv=modelViewMatrix*vec4(p,1.0);
-      gl_PointSize=aSize*uPixelRatio*(300.0/-mv.z)*(0.2+0.8*e)*(0.85+0.15*tw);
+      gl_PointSize=aSize*uPixelRatio*(300.0/-mv.z)*(0.2+0.8*e);
       gl_Position=projectionMatrix*mv;
     }`,
   fragmentShader:`
-    uniform sampler2D uTex; varying vec3 vColor; varying float vE; varying float vTw;
+    uniform sampler2D uTex; varying vec3 vColor; varying float vE;
     void main(){
       vec4 t=texture2D(uTex,gl_PointCoord);
       if(t.a<0.02) discard;
       vec3 c=vColor*(1.1+0.65*vE)+vec3(0.16)*pow(t.a,3.0);
-      gl_FragColor=vec4(c*vTw, t.a*vE);   // twinkle modulates brightness
+      gl_FragColor=vec4(c, t.a*vE);
     }`
 });
 let explodeStart=0;
@@ -416,12 +438,8 @@ function buildGalaxy(data){
   // fixed 5x3 projection for intra-cluster residual placement
   const P=[]; for(let i=0;i<15;i++)P.push(rng()*2-1);
 
-  // pick ~4 clusters to be "twinkling constellations" (gentle irregular pulse)
-  const twinkleClusters=new Set();
-  while(twinkleClusters.size<Math.min(4,K)) twinkleClusters.add(Math.floor(rng()*K));
-
   const pos=new Float32Array(n*3), col=new Float32Array(n*3), size=new Float32Array(n),
-        delay=new Float32Array(n), twk=new Float32Array(n);
+        delay=new Float32Array(n);
   for(let i=0;i<n;i++){
     const f=norm[i];
     // nearest attractor in feature space -> vector quantization = clusters
@@ -442,7 +460,6 @@ function buildGalaxy(data){
     const c=pctColor(pct); col[i*3]=c.r;col[i*3+1]=c.g;col[i*3+2]=c.b;
     size[i]=7+Math.max(0,(20-mag))*2.0+pct*0.08;
     delay[i]=0.72*(i/n)+rng()*0.18;   // brightest/most-variable ignite first, in waves
-    twk[i]=twinkleClusters.has(best) ? (0.3+rng()*6.0) : 0.0;  // per-star phase, or steady
   }
   const g=new THREE.BufferGeometry();
   g.setAttribute('aHome',new THREE.BufferAttribute(pos,3));
@@ -450,7 +467,6 @@ function buildGalaxy(data){
   g.setAttribute('aColor',new THREE.BufferAttribute(col,3));
   g.setAttribute('aSize',new THREE.BufferAttribute(size,1));
   g.setAttribute('aDelay',new THREE.BufferAttribute(delay,1));
-  g.setAttribute('aTwinkle',new THREE.BufferAttribute(twk,1));
   starPoints=new THREE.Points(g,starMat); starPoints.frustumCulled=false;
   scene.add(starPoints);
 
@@ -531,7 +547,7 @@ function loop(){
     starMat.uniforms.uProg.value=Math.min((performance.now()-explodeStart)/3000,1);
     if(starPoints) starPoints.rotation.y+=dt*0.015;
   }
-  starMat.uniforms.uTime.value=clock.elapsedTime;   // drives the twinkle pulse
+  if(starfieldMat) starfieldMat.uniforms.uTime.value=clock.elapsedTime;   // background twinkle
   nebulaGroup.rotation.y+=dt*0.01;
   controls.update();
   if(pickDirty){ pick(); pickDirty=false; }          // raycast only after mouse move
