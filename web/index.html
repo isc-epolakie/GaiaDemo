@@ -491,7 +491,7 @@ window.reveal=async()=>{
     const [galaxy,tablePage]=await Promise.all([fetchPage(x,1,GALAXY_N),fetchPage(x,1,PAGE_SIZE)]);
     total=galaxy.total; page=1; tableRows=tablePage.rows; sortCol=null;
     buildGalaxy(galaxy.rows); renderTable();
-    // brief confirmation, then fade out — the count also lives on the table header
+    // brief confirmation, then fade out (the count also lives on the table header)
     setStatus(`${total.toLocaleString()} sources found`);
     statusTimer=setTimeout(()=>setStatus(''),2600);
   }catch(e){setStatus('Error: '+e.message,true);}
