@@ -307,7 +307,7 @@ let starfieldMat=null;
         float s=0.6*sin(uTime*aRate+aPhase)+0.4*sin(uTime*aRate*0.53+aPhase*1.7);
         vTw=0.55+0.45*s;
         vec4 mv=modelViewMatrix*vec4(position,1.0);
-        gl_PointSize=(1.4+1.4*vTw)*uPixelRatio*(600.0/-mv.z);
+        gl_PointSize=(1.7+1.6*vTw)*uPixelRatio*(600.0/-mv.z);
         gl_Position=projectionMatrix*mv;
       }`,
     fragmentShader:`
@@ -315,7 +315,7 @@ let starfieldMat=null;
       void main(){
         vec4 t=texture2D(uTex,gl_PointCoord);
         if(t.a<0.02) discard;
-        gl_FragColor=vec4(vColor*(0.5+0.9*vTw), t.a*(0.35+0.65*vTw));
+        gl_FragColor=vec4(vColor*(0.85+1.05*vTw), t.a*(0.6+0.6*vTw));
       }`
   });
   scene.add(new THREE.Points(g,starfieldMat));
@@ -676,9 +676,9 @@ window.__galaxyReady=true;
     frames[0].opacity=0; frames[N].opacity=0;
     el.style.transform=frames[0].transform;
     el.animate(frames,{duration:dur, easing:'linear'});
-    setTimeout(fly, dur + 9000 + Math.random()*22000);    // infrequent gaps
+    setTimeout(fly, dur + 20000 + Math.random()*35000);   // infrequent gaps (~20-55s)
   }
-  setTimeout(fly, 6000 + Math.random()*8000);
+  setTimeout(fly, 12000 + Math.random()*12000);
 })();
 </script>
 <script>
